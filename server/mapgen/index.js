@@ -12,16 +12,16 @@ export function generateMap(seed, width, height) {
   const rockyNoise = makeNoise(rng, 2, 1 / 18);
   const tiles = generateTerrain(width, height, rng, terrainNoise, rockyNoise);
 
-  const forestNoise = makeNoise(rng, 2, 1 / 14);
+  const forestNoise = makeNoise(rng, 2, 1 / 18);
   const forestResult = generateForests(tiles, width, height, rng, forestNoise);
 
-  const stoneNoise = makeNoise(rng, 3, 1 / 20);
+  const stoneNoise = makeNoise(rng, 3, 1 / 24);
   const stoneResult = generateStoneDeposits(tiles, width, height, rng, stoneNoise);
 
-  const copperNoise = makeNoise(rng, 3, 1 / 24);
+  const copperNoise = makeNoise(rng, 3, 1 / 28);
   const copperResult = generateCopperDeposits(tiles, width, height, rng, copperNoise);
 
-  const ironNoise = makeNoise(rng, 3, 1 / 28);
+  const ironNoise = makeNoise(rng, 3, 1 / 32);
   const ironResult = generateIronDeposits(tiles, width, height, rng, ironNoise);
 
   const resourceSites = [
@@ -71,8 +71,17 @@ function computeStats(tiles, width, height, resourceSites, resourceEntities) {
     copperNodes: 0,
     ironDeposits: 0,
     ironNodes: 0,
+    oreDepositCount: 0,
+    avgTreesPerForest: 0,
+    largestForestTreeCount: 0,
+    smallestForestTreeCount: 0,
+    waterPercent: 0,
+    rockyPercent: 0,
+    openBuildablePercent: 0,
     validSpawns: 0,
   };
+
+  const total = width * height;
 
   for (let x = 0; x < width; x++) {
     for (let y = 0; y < height; y++) {
@@ -83,13 +92,25 @@ function computeStats(tiles, width, height, resourceSites, resourceEntities) {
     }
   }
 
+  const forestTreeCounts = [];
+
   for (const site of resourceSites) {
-    if (site.type === 'forest') stats.forests++;
+    if (site.type === 'forest') {
+      stats.forests++;
+      forestTreeCounts.push(site.nodeIds.length);
+    }
     if (site.type === 'deposit_site') {
+      stats.oreDepositCount++;
       if (site.resourceType === 'stone') stats.stoneDeposits++;
       if (site.resourceType === 'copper') stats.copperDeposits++;
       if (site.resourceType === 'iron') stats.ironDeposits++;
     }
+  }
+
+  if (forestTreeCounts.length > 0) {
+    stats.avgTreesPerForest = Math.round(forestTreeCounts.reduce((a, b) => a + b, 0) / forestTreeCounts.length);
+    stats.largestForestTreeCount = Math.max(...forestTreeCounts);
+    stats.smallestForestTreeCount = Math.min(...forestTreeCounts);
   }
 
   for (const entity of resourceEntities) {
@@ -100,6 +121,10 @@ function computeStats(tiles, width, height, resourceSites, resourceEntities) {
       if (entity.resourceType === 'iron') stats.ironNodes++;
     }
   }
+
+  stats.waterPercent = Math.round((stats.water / total) * 100);
+  stats.rockyPercent = Math.round((stats.rocky / total) * 100);
+  stats.openBuildablePercent = Math.round(((stats.grass + stats.rocky) / total) * 100);
 
   return stats;
 }

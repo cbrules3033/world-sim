@@ -39,97 +39,152 @@ function markTileBlocked(tiles, x, y, width, height) {
   tiles[tx][ty].buildable = false;
 }
 
+function hasRockyNearby(tiles, width, height, cx, cy, range) {
+  for (let dx = -range; dx <= range; dx++) {
+    for (let dy = -range; dy <= range; dy++) {
+      const nx = cx + dx;
+      const ny = cy + dy;
+      if (nx < 0 || nx >= width || ny < 0 || ny >= height) continue;
+      if (tiles[nx][ny].terrain === TERRAIN.ROCKY) return true;
+    }
+  }
+  return false;
+}
+
+function isValidForestCenter(tiles, width, height, cx, cy, occupiedCenters) {
+  if (tiles[cx][cy].terrain !== TERRAIN.GRASS) return false;
+
+  for (let dx = -FOREST.centerWaterClearance; dx <= FOREST.centerWaterClearance; dx++) {
+    for (let dy = -FOREST.centerWaterClearance; dy <= FOREST.centerWaterClearance; dy++) {
+      const nx = cx + dx;
+      const ny = cy + dy;
+      if (nx < 0 || nx >= width || ny < 0 || ny >= height) return false;
+      if (tiles[nx][ny].terrain === TERRAIN.WATER) return false;
+    }
+  }
+
+  let grassCount = 0;
+  let totalChecked = 0;
+  const cr = FOREST.centerGrassCheckRadius;
+  for (let dx = -cr; dx <= cr; dx++) {
+    for (let dy = -cr; dy <= cr; dy++) {
+      const nx = cx + dx;
+      const ny = cy + dy;
+      if (nx < 0 || nx >= width || ny < 0 || ny >= height) continue;
+      totalChecked++;
+      if (tiles[nx][ny].terrain === TERRAIN.GRASS) grassCount++;
+    }
+  }
+  if (totalChecked === 0 || grassCount / totalChecked < FOREST.centerGrassThreshold) return false;
+
+  for (const oc of occupiedCenters) {
+    if (dist(cx, cy, oc.x, oc.y) < oc.radius + FOREST.forestSeparationGap) return false;
+  }
+
+  return true;
+}
+
 export function generateForests(tiles, width, height, rng, noiseFn) {
   resetCounters();
   const sites = [];
   const entities = [];
-  const centers = [];
+  const occupiedCenters = [];
 
-  for (let x = 6; x < width - 6; x += 3) {
-    for (let y = 6; y < height - 6; y += 3) {
-      const n = noiseFn(x, y);
-      if (n < 0.65) continue;
-      if (tiles[x][y].terrain !== TERRAIN.GRASS) continue;
+  const area = width * height;
+  const targetCount = Math.max(3, Math.floor(area / FOREST.targetAreaFactor));
+  const maxAttempts = targetCount * 80;
 
-      let tooClose = false;
-      for (const c of centers) {
-        if (dist(x, y, c.x, c.y) < FOREST.minRadius * 2.5) { tooClose = true; break; }
-      }
-      if (tooClose) continue;
+  let attempts = 0;
+  while (sites.length < targetCount && attempts < maxAttempts) {
+    attempts++;
 
-      centers.push({ x, y });
+    const cx = FOREST.centerEdgeMargin + Math.floor(rng() * (width - FOREST.centerEdgeMargin * 2));
+    const cy = FOREST.centerEdgeMargin + Math.floor(rng() * (height - FOREST.centerEdgeMargin * 2));
 
-      const radius = FOREST.minRadius + rng() * (FOREST.maxRadius - FOREST.minRadius);
-      const numTrees = Math.floor(FOREST.minTrees + rng() * (FOREST.maxTrees - FOREST.minTrees));
-      const siteId = nextSiteId('forest');
-      const treeIds = [];
+    if (!isValidForestCenter(tiles, width, height, cx, cy, occupiedCenters)) continue;
 
-      for (let i = 0; i < numTrees; i++) {
-        const angle = rng() * Math.PI * 2;
-        const rawDist = rng() * radius;
-        const distFromCenter = rawDist * Math.sqrt(rng());
-        const tx = x + Math.cos(angle) * distFromCenter;
-        const ty = y + Math.sin(angle) * distFromCenter;
+    const radius = FOREST.minRadius + rng() * (FOREST.maxRadius - FOREST.minRadius);
+    const siteId = nextSiteId('forest');
+    const treeIds = [];
 
-        if (!isOnGrass(tiles, tx, ty, width, height)) continue;
+    const targetTrees = Math.floor(FOREST.minTrees + rng() * (FOREST.maxTrees - FOREST.minTrees));
 
-        let overlapping = false;
-        for (const eid of treeIds) {
-          const existing = entities.find(e => e.id === eid);
-          if (existing && dist(tx, ty, existing.position.x, existing.position.y) < FOREST.minSpacing) {
-            overlapping = true;
-            break;
-          }
+    let treeAttempts = 0;
+    const maxTreeAttempts = targetTrees * 10;
+    while (treeIds.length < targetTrees && treeAttempts < maxTreeAttempts) {
+      treeAttempts++;
+
+      const angle = rng() * Math.PI * 2;
+      const d = radius * Math.sqrt(rng());
+      const tx = cx + Math.cos(angle) * d;
+      const ty = cy + Math.sin(angle) * d;
+
+      const edgeNoise = noiseFn(tx * 0.25, ty * 0.25);
+      if (d > radius * (0.65 + edgeNoise * 0.35)) continue;
+
+      if (!isOnGrass(tiles, tx, ty, width, height)) continue;
+
+      let overlapping = false;
+      for (const eid of treeIds) {
+        const existing = entities.find(e => e.id === eid);
+        if (existing && dist(tx, ty, existing.position.x, existing.position.y) < FOREST.minSpacing) {
+          overlapping = true;
+          break;
         }
-        if (overlapping) continue;
-
-        const treeId = nextEntityId('tree');
-        treeIds.push(treeId);
-
-        const entityRadius = FOREST.entityRadiusMin + rng() * (FOREST.entityRadiusMax - FOREST.entityRadiusMin);
-
-        entities.push({
-          id: treeId,
-          type: ENTITY_TYPES.TREE,
-          resourceType: RESOURCE_TYPES.WOOD,
-          amount: FOREST.treeAmount,
-          position: { x: tx, y: ty },
-          radius: entityRadius,
-          blocksMovement: true,
-          blocksBuilding: true,
-          canBeGathered: true,
-        });
-
-        markTileBlocked(tiles, tx, ty, width, height);
       }
+      if (overlapping) continue;
 
-      if (treeIds.length > 0) {
-        sites.push({
-          id: siteId,
-          type: SITE_TYPES.FOREST,
-          resourceType: RESOURCE_TYPES.WOOD,
-          center: { x, y },
-          radius,
-          nodeIds: treeIds,
-        });
-      }
+      const treeId = nextEntityId('tree');
+      treeIds.push(treeId);
+
+      const entityRadius = FOREST.entityRadiusMin + rng() * (FOREST.entityRadiusMax - FOREST.entityRadiusMin);
+
+      entities.push({
+        id: treeId,
+        type: ENTITY_TYPES.TREE,
+        resourceType: RESOURCE_TYPES.WOOD,
+        amount: FOREST.treeAmount,
+        position: { x: tx, y: ty },
+        radius: entityRadius,
+        blocksMovement: true,
+        blocksBuilding: true,
+        canBeGathered: true,
+      });
+
+      markTileBlocked(tiles, tx, ty, width, height);
+    }
+
+    if (treeIds.length >= FOREST.minRequiredTrees) {
+      sites.push({
+        id: siteId,
+        type: SITE_TYPES.FOREST,
+        resourceType: RESOURCE_TYPES.WOOD,
+        center: { x: cx, y: cy },
+        radius,
+        nodeIds: treeIds,
+      });
+      occupiedCenters.push({ x: cx, y: cy, radius: radius + FOREST.forestSeparationGap });
     }
   }
 
   return { sites, entities };
 }
 
-function generateOreDepositType(tiles, width, height, rng, resourceType, noiseFn, threshold) {
+function generateOreDepositType(tiles, width, height, rng, resourceType, noiseFn, threshold, requireRockyNearby) {
   const config = DEPOSITS[resourceType];
   const sites = [];
   const entities = [];
   const centers = [];
 
-  for (let x = 6; x < width - 6; x += 3) {
-    for (let y = 6; y < height - 6; y += 3) {
+  const margin = 6;
+
+  for (let x = margin; x < width - margin; x += 4) {
+    for (let y = margin; y < height - margin; y += 4) {
       const n = noiseFn(x, y);
       if (n < threshold) continue;
       if (tiles[x][y].terrain !== TERRAIN.GRASS) continue;
+
+      if (requireRockyNearby && !hasRockyNearby(tiles, width, height, x, y, 5)) continue;
 
       let tooClose = false;
       for (const c of centers) {
@@ -146,7 +201,7 @@ function generateOreDepositType(tiles, width, height, rng, resourceType, noiseFn
 
       for (let i = 0; i < numNodes; i++) {
         const angle = rng() * Math.PI * 2;
-        const distFromCenter = rng() * radius * 0.9;
+        const distFromCenter = rng() * radius * 0.8;
         const nx = x + Math.cos(angle) * distFromCenter;
         const ny = y + Math.sin(angle) * distFromCenter;
 
@@ -191,13 +246,13 @@ function generateOreDepositType(tiles, width, height, rng, resourceType, noiseFn
 }
 
 export function generateStoneDeposits(tiles, width, height, rng, noiseFn) {
-  return generateOreDepositType(tiles, width, height, rng, 'stone', noiseFn, 0.70);
+  return generateOreDepositType(tiles, width, height, rng, 'stone', noiseFn, 0.70, false);
 }
 
 export function generateCopperDeposits(tiles, width, height, rng, noiseFn) {
-  return generateOreDepositType(tiles, width, height, rng, 'copper', noiseFn, 0.77);
+  return generateOreDepositType(tiles, width, height, rng, 'copper', noiseFn, 0.77, true);
 }
 
 export function generateIronDeposits(tiles, width, height, rng, noiseFn) {
-  return generateOreDepositType(tiles, width, height, rng, 'iron', noiseFn, 0.83);
+  return generateOreDepositType(tiles, width, height, rng, 'iron', noiseFn, 0.83, true);
 }

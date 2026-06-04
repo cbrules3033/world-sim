@@ -42,18 +42,25 @@ export const SPAWN_CLEAR_RADIUS = 5;
 export const SPAWN_NEARBY_RADIUS = 25;
 
 export const FOREST = {
-  minRadius: 8,
-  maxRadius: 15,
-  minTrees: 30,
-  maxTrees: 80,
+  targetAreaFactor: 1800,
+  minRadius: 7,
+  maxRadius: 14,
+  minTrees: 40,
+  maxTrees: 120,
+  minRequiredTrees: 20,
   treeAmount: 100,
-  minSpacing: 1.2,
+  minSpacing: 0.9,
   entityRadiusMin: 0.25,
   entityRadiusMax: 0.5,
+  centerEdgeMargin: 8,
+  centerWaterClearance: 3,
+  centerGrassThreshold: 0.7,
+  centerGrassCheckRadius: 10,
+  forestSeparationGap: 6,
 };
 
 export const DEPOSITS = {
-  stone: { minNodes: 5, maxNodes: 10, nodeAmount: 1000, minRadius: 4, maxRadius: 7, minDistance: 18 },
-  copper: { minNodes: 4, maxNodes: 8, nodeAmount: 1000, minRadius: 4, maxRadius: 6, minDistance: 25 },
-  iron: { minNodes: 3, maxNodes: 6, nodeAmount: 1200, minRadius: 3, maxRadius: 5, minDistance: 26 },
+  stone: { minNodes: 5, maxNodes: 10, nodeAmount: 1000, minRadius: 3, maxRadius: 5, minDistance: 18 },
+  copper: { minNodes: 4, maxNodes: 8, nodeAmount: 1000, minRadius: 3, maxRadius: 5, minDistance: 22 },
+  iron: { minNodes: 3, maxNodes: 6, nodeAmount: 1200, minRadius: 3, maxRadius: 4, minDistance: 24 },
 };

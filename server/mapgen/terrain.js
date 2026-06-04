@@ -10,7 +10,7 @@ export function generateTerrain(width, height, rng, terrainNoise, rockyNoise) {
       let terrain;
       if (n < 0.32) {
         terrain = TERRAIN.WATER;
-      } else if (rockyNoise && rockyNoise(x, y) > 0.75) {
+      } else if (rockyNoise && rockyNoise(x, y) > 0.76) {
         terrain = TERRAIN.ROCKY;
       } else {
         terrain = TERRAIN.GRASS;

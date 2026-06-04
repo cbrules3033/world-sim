@@ -1,7 +1,7 @@
 const TERRAIN_COLORS = {
   0: 0x4a8c3f,
   1: 0x2b6cb0,
-  2: 0x6b5b4f,
+  2: 0x5f6a4f,
 };
 
 const ENTITY_COLORS = {
