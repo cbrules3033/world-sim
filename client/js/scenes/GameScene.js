@@ -31,6 +31,33 @@ class GameScene extends Phaser.Scene {
     this.nextBuildingId = 1;
     this.nextUnitId = 1;
 
+    this.buildGridWidth = this.width * SCALE.BUILD_CELLS_PER_TILE;
+    this.buildGridHeight = this.height * SCALE.BUILD_CELLS_PER_TILE;
+    this.buildGrid = [];
+
+    for (let gy = 0; gy < this.buildGridHeight; gy++) {
+      const row = [];
+      for (let gx = 0; gx < this.buildGridWidth; gx++) {
+        const tx = Math.floor(gx / SCALE.BUILD_CELLS_PER_TILE);
+        const ty = Math.floor(gy / SCALE.BUILD_CELLS_PER_TILE);
+        const tile = this.tiles[ty * this.width + tx];
+        const isWater = !tile || tile.t === 1;
+        row.push({
+          x: gx, y: gy,
+          terrainTileX: tx, terrainTileY: ty,
+          buildable: !isWater,
+          pathable: !isWater,
+          occupiedBy: null,
+          blockedBy: null,
+        });
+      }
+      this.buildGrid.push(row);
+    }
+
+    for (const entity of this.resourceEntities) {
+      this.blockBuildCellsForEntity(entity);
+    }
+
     console.log('MAP DATA RECEIVED:', {
       seed: this.seed,
       size: `${this.width}x${this.height}`,
@@ -38,9 +65,33 @@ class GameScene extends Phaser.Scene {
       resourceSites: this.resourceSites?.length,
       resourceEntities: this.resourceEntities?.length,
       stats: this.stats,
+      buildGrid: `${this.buildGridWidth}x${this.buildGridHeight}`,
     });
-    console.log('First 10 resource entities:', this.resourceEntities.slice(0, 10));
-    console.log('First 10 resource sites:', this.resourceSites.slice(0, 10));
+  }
+
+  blockBuildCellsForEntity(entity) {
+    const px = entity.position.x * SCALE.TERRAIN_TILE_SIZE;
+    const py = entity.position.y * SCALE.TERRAIN_TILE_SIZE;
+    const radius = entity.collisionRadiusPx || 6;
+
+    const minBX = Math.max(0, Math.floor((px - radius) / SCALE.BUILD_CELL_SIZE));
+    const maxBX = Math.min(this.buildGridWidth - 1, Math.floor((px + radius) / SCALE.BUILD_CELL_SIZE));
+    const minBY = Math.max(0, Math.floor((py - radius) / SCALE.BUILD_CELL_SIZE));
+    const maxBY = Math.min(this.buildGridHeight - 1, Math.floor((py + radius) / SCALE.BUILD_CELL_SIZE));
+
+    for (let gy = minBY; gy <= maxBY; gy++) {
+      for (let gx = minBX; gx <= maxBX; gx++) {
+        const cellCX = gx * SCALE.BUILD_CELL_SIZE + SCALE.BUILD_CELL_SIZE / 2;
+        const cellCY = gy * SCALE.BUILD_CELL_SIZE + SCALE.BUILD_CELL_SIZE / 2;
+        const dx = cellCX - px;
+        const dy = cellCY - py;
+        if (dx * dx + dy * dy <= radius * radius) {
+          this.buildGrid[gy][gx].buildable = false;
+          this.buildGrid[gy][gx].pathable = false;
+          this.buildGrid[gy][gx].blockedBy = entity.id;
+        }
+      }
+    }
   }
 
   create() {
@@ -67,8 +118,8 @@ class GameScene extends Phaser.Scene {
     this.showSiteBounds = false;
     this.showEntityIcons = true;
     this.placementMode = null;
-    this.ghostTileX = 0;
-    this.ghostTileY = 0;
+    this.ghostBuildX = 0;
+    this.ghostBuildY = 0;
     this.ghostValid = false;
 
     this.renderTerrain();
@@ -85,10 +136,9 @@ class GameScene extends Phaser.Scene {
     this.input.keyboard.on('keydown-ONE', () => { this.showSiteBounds = !this.showSiteBounds; this.renderSiteBounds(); });
     this.input.keyboard.on('keydown-TWO', () => { this.showEntityIcons = !this.showEntityIcons; this.renderEntities(); });
 
-    this.input.keyboard.on('keydown-T', () => this.startBuildingPlacement('town_center', 6, 6));
-    this.input.keyboard.on('keydown-H', () => this.startBuildingPlacement('house', 2, 2));
-    this.input.keyboard.on('keydown-L', () => this.startBuildingPlacement('lumber_camp', 3, 3));
-    this.input.keyboard.on('keydown-M', () => this.startBuildingPlacement('mining_camp', 3, 3));
+    for (const [key, def] of Object.entries(BUILDING_DEFS)) {
+      this.input.keyboard.on(`keydown-${def.hotkey}`, () => this.startBuildingPlacement(key));
+    }
     this.input.keyboard.on('keydown-ESC', () => this.cancelBuildingPlacement());
 
     this.input.keyboard.on('keydown-F', () => this.jumpToFirstSite('forest'));
@@ -99,12 +149,12 @@ class GameScene extends Phaser.Scene {
     this.input.on('pointerdown', (pointer) => this.onPointerDown(pointer));
   }
 
-  getPointerWorld() {
+  getPointerWorldPx() {
     const cam = this.cameras.main;
     const pointer = this.input.activePointer;
     return {
-      x: (pointer.x / this.scale.width * cam.width + cam.scrollX) / TILE_SIZE,
-      y: (pointer.y / this.scale.height * cam.height + cam.scrollY) / TILE_SIZE,
+      x: (pointer.x / this.scale.width * cam.width + cam.scrollX),
+      y: (pointer.y / this.scale.height * cam.height + cam.scrollY),
     };
   }
 
@@ -115,21 +165,22 @@ class GameScene extends Phaser.Scene {
     const total = this.tiles.length;
     for (let i = 0; i < total; i++) {
       const tile = this.tiles[i];
-      const x = (i % this.width) * TILE_SIZE;
-      const y = Math.floor(i / this.width) * TILE_SIZE;
+      const x = (i % this.width) * SCALE.TERRAIN_TILE_SIZE;
+      const y = Math.floor(i / this.width) * SCALE.TERRAIN_TILE_SIZE;
+      const s = SCALE.TERRAIN_TILE_SIZE;
 
       const color = TERRAIN_COLORS[tile.t] || 0x4a8c3f;
       g.fillStyle(color, 1);
-      g.fillRect(x, y, TILE_SIZE, TILE_SIZE);
+      g.fillRect(x, y, s, s);
 
       if (tile.t === 1) {
         g.lineStyle(1, 0x1a4a7a, 0.3);
-        g.strokeRect(x, y, TILE_SIZE, TILE_SIZE);
+        g.strokeRect(x, y, s, s);
       }
 
       if (tile.t === 2) {
         g.fillStyle(0x5a4a3f, 0.4);
-        g.fillCircle(x + TILE_SIZE / 2, y + TILE_SIZE / 2, 3);
+        g.fillCircle(x + s / 2, y + s / 2, 3);
       }
     }
   }
@@ -141,36 +192,30 @@ class GameScene extends Phaser.Scene {
     const eg = this.entityGraphics;
 
     for (const entity of this.resourceEntities) {
-      const px = entity.position.x * TILE_SIZE;
-      const py = entity.position.y * TILE_SIZE;
-      const r = Math.max(entity.radius * TILE_SIZE, 10);
+      const px = entity.position.x * SCALE.TERRAIN_TILE_SIZE;
+      const py = entity.position.y * SCALE.TERRAIN_TILE_SIZE;
+      const r = Math.max(entity.radius * SCALE.TERRAIN_TILE_SIZE, 12);
 
       switch (entity.type) {
         case 'tree': {
           eg.fillStyle(0x000000, 0.25);
-          eg.fillEllipse(px + 2, py + r * 0.45, r * 1.1, r * 0.35);
-
+          eg.fillEllipse(px + 3, py + r * 0.35, r * 1.2, r * 0.3);
           eg.fillStyle(0x6b3f1d, 1);
-          eg.fillRect(px - r * 0.12, py + r * 0.2, r * 0.24, r * 0.55);
-
+          eg.fillRect(px - r * 0.1, py + r * 0.15, r * 0.2, r * 0.45);
           eg.fillStyle(0x0f8f2f, 1);
-          eg.fillCircle(px, py, r * 0.75);
-
-          eg.fillStyle(0x38c950, 0.7);
-          eg.fillCircle(px - r * 0.22, py - r * 0.18, r * 0.32);
+          eg.fillCircle(px, py, r * 1.0);
+          eg.fillStyle(0x38c950, 0.6);
+          eg.fillCircle(px - r * 0.2, py - r * 0.18, r * 0.4);
           break;
         }
         case 'ore_node': {
           const color = ENTITY_COLORS[entity.resourceType] || 0xffffff;
-
           eg.fillStyle(0x000000, 0.25);
           eg.fillEllipse(px + 2, py + r * 0.4, r * 1.3, r * 0.4);
-
           eg.fillStyle(color, 1);
           eg.fillCircle(px - r * 0.3, py + r * 0.1, r * 0.45);
           eg.fillCircle(px + r * 0.25, py, r * 0.5);
           eg.fillCircle(px, py - r * 0.25, r * 0.4);
-
           eg.lineStyle(2, 0x111111, 0.4);
           eg.strokeCircle(px + r * 0.25, py, r * 0.5);
           break;
@@ -184,23 +229,16 @@ class GameScene extends Phaser.Scene {
     if (!this.showSiteBounds) return;
 
     const sg = this.siteGraphics;
-
     for (const site of this.resourceSites) {
-      const px = site.center.x * TILE_SIZE;
-      const py = site.center.y * TILE_SIZE;
-      const r = site.radius * TILE_SIZE;
-
+      const px = site.center.x * SCALE.TERRAIN_TILE_SIZE;
+      const py = site.center.y * SCALE.TERRAIN_TILE_SIZE;
+      const r = site.radius * SCALE.TERRAIN_TILE_SIZE;
       const color = SITE_COLORS[site.type] || 0xffffff;
 
       sg.lineStyle(1, color, 0.35);
       sg.strokeCircle(px, py, r);
-
       sg.fillStyle(color, 0.05);
       sg.fillCircle(px, py, r);
-
-      const label = site.resourceType === 'wood' ? 'FOREST' : site.resourceType.toUpperCase();
-      sg.fillStyle(0x000000, 0.5);
-      sg.fillRect(px - 20, py - 5, 40, 10);
     }
   }
 
@@ -210,12 +248,12 @@ class GameScene extends Phaser.Scene {
 
     const sg = this.spawnGraphics;
     for (const spawn of this.spawns) {
-      const x = spawn.x * TILE_SIZE + TILE_SIZE / 2;
-      const y = spawn.y * TILE_SIZE + TILE_SIZE / 2;
+      const x = spawn.x * SCALE.TERRAIN_TILE_SIZE + SCALE.TERRAIN_TILE_SIZE / 2;
+      const y = spawn.y * SCALE.TERRAIN_TILE_SIZE + SCALE.TERRAIN_TILE_SIZE / 2;
       sg.lineStyle(2, 0x00ff00, 0.8);
-      sg.strokeCircle(x, y, TILE_SIZE * 1.5);
+      sg.strokeCircle(x, y, SCALE.TERRAIN_TILE_SIZE * 1.5);
       sg.lineStyle(1, 0x00ff00, 0.3);
-      sg.strokeCircle(x, y, TILE_SIZE * 4);
+      sg.strokeCircle(x, y, SCALE.TERRAIN_TILE_SIZE * 4);
     }
   }
 
@@ -223,21 +261,24 @@ class GameScene extends Phaser.Scene {
     this.buildingGraphics.clear();
 
     for (const b of this.buildings) {
-      const x = b.tileX * TILE_SIZE;
-      const y = b.tileY * TILE_SIZE;
-      const w = b.width * TILE_SIZE;
-      const h = b.height * TILE_SIZE;
+      const px = b.buildX * SCALE.BUILD_CELL_SIZE;
+      const py = b.buildY * SCALE.BUILD_CELL_SIZE;
+      const pw = b.footprintW * SCALE.BUILD_CELL_SIZE;
+      const ph = b.footprintH * SCALE.BUILD_CELL_SIZE;
+      const pad = SCALE.BUILD_CELL_SIZE;
+      const color = BUILDING_DEFS[b.type]?.color || 0xb08a55;
 
-      let color = 0xb08a55;
-      if (b.type === 'town_center') color = 0xc49a5a;
-      if (b.type === 'house') color = 0xd2b48c;
-      if (b.type === 'lumber_camp') color = 0x8b5a2b;
-      if (b.type === 'mining_camp') color = 0x777777;
+      this.buildingGraphics.fillStyle(0x000000, 0.2);
+      this.buildingGraphics.fillRect(px + 3, py + 3, pw, ph);
 
       this.buildingGraphics.fillStyle(color, 1);
-      this.buildingGraphics.fillRect(x, y, w, h);
-      this.buildingGraphics.lineStyle(2, 0x222222, 0.8);
-      this.buildingGraphics.strokeRect(x, y, w, h);
+      this.buildingGraphics.fillRect(px, py, pw, ph);
+
+      this.buildingGraphics.fillStyle(0x000000, 0.08);
+      this.buildingGraphics.fillRect(px + pad, py + pad, pw - pad * 2, ph - pad * 2);
+
+      this.buildingGraphics.lineStyle(1, 0x222222, 0.8);
+      this.buildingGraphics.strokeRect(px, py, pw, ph);
     }
   }
 
@@ -246,24 +287,21 @@ class GameScene extends Phaser.Scene {
     this.selectionGraphics.clear();
 
     for (const u of this.units) {
-      const px = u.x * TILE_SIZE;
-      const py = u.y * TILE_SIZE;
-
       this.unitGraphics.fillStyle(0xffffcc, 1);
-      this.unitGraphics.fillCircle(px, py, 6);
+      this.unitGraphics.fillCircle(u.x, u.y, SCALE.UNIT_RADIUS_PX);
       this.unitGraphics.lineStyle(1, 0x333333, 1);
-      this.unitGraphics.strokeCircle(px, py, 6);
+      this.unitGraphics.strokeCircle(u.x, u.y, SCALE.UNIT_RADIUS_PX);
 
       if (u.selected) {
         this.selectionGraphics.lineStyle(2, 0x00ff00, 1);
-        this.selectionGraphics.strokeCircle(px, py, 10);
+        this.selectionGraphics.strokeCircle(u.x, u.y, SCALE.UNIT_SELECTION_RADIUS_PX);
       }
     }
   }
 
   setupCamera() {
-    const worldW = this.width * TILE_SIZE;
-    const worldH = this.height * TILE_SIZE;
+    const worldW = this.width * SCALE.TERRAIN_TILE_SIZE;
+    const worldH = this.height * SCALE.TERRAIN_TILE_SIZE;
     this.cameras.main.setBounds(0, 0, worldW, worldH);
 
     this.input.on('pointermove', (pointer) => {
@@ -273,8 +311,10 @@ class GameScene extends Phaser.Scene {
       }
 
       const cam = this.cameras.main;
-      this.ghostTileX = Math.floor((pointer.x / this.scale.width * cam.width + cam.scrollX) / TILE_SIZE);
-      this.ghostTileY = Math.floor((pointer.y / this.scale.height * cam.height + cam.scrollY) / TILE_SIZE);
+      const worldPxX = (pointer.x / this.scale.width * cam.width + cam.scrollX);
+      const worldPxY = (pointer.y / this.scale.height * cam.height + cam.scrollY);
+      this.ghostBuildX = Math.floor(worldPxX / SCALE.BUILD_CELL_SIZE);
+      this.ghostBuildY = Math.floor(worldPxY / SCALE.BUILD_CELL_SIZE);
     });
 
     this.input.on('wheel', (pointer, gameObjects, deltaX, deltaY) => {
@@ -289,17 +329,18 @@ class GameScene extends Phaser.Scene {
     this.debugPanel.setScrollFactor(0);
     this.debugPanel.setDepth(100);
 
-    const bg = this.add.rectangle(0, 0, 340, 260, 0x000000, 0.7).setOrigin(0, 0);
+    const bg = this.add.rectangle(0, 0, 360, 270, 0x000000, 0.7).setOrigin(0, 0);
     this.debugText = this.add.text(10, 10, '', {
-      fontSize: '11px', color: '#0f0', fontFamily: 'monospace', lineSpacing: 3, wordWrap: { width: 320 }
+      fontSize: '11px', color: '#0f0', fontFamily: 'monospace', lineSpacing: 3, wordWrap: { width: 340 }
     });
     this.debugPanel.add([bg, this.debugText]);
     this.debugPanel.visible = this.debugVisible;
 
-    this.add.text(10, this.scale.height - 108,
-      '` : Debug  |  1 : Site Bounds  |  2 : Entities\n' +
-      'T : TC(6x6)  H : House(2x2)  L : Camp(3x3)  M : Mining(3x3)\n' +
-      'F : Forest  |  O : Stone  |  C : Copper  |  I : Iron  |  ESC : Cancel', {
+    const hotkeyList = Object.values(BUILDING_DEFS).map(d => `${d.hotkey}:${d.label.split(' ')[0]}`).join('  ');
+    this.add.text(10, this.scale.height - 95,
+      '` : Debug  |  1 : Bounds  |  2 : Entities\n' +
+      `${hotkeyList}\n` +
+      'F:Forest  O:Stone  C:Copper  I:Iron  | ESC:Cancel', {
       fontSize: '11px', color: '#555', fontFamily: 'monospace'
     }).setScrollFactor(0).setDepth(100);
   }
@@ -310,13 +351,14 @@ class GameScene extends Phaser.Scene {
   }
 
   getEntityAtPointer() {
-    const w = this.getPointerWorld();
-
+    const wp = this.getPointerWorldPx();
     let closest = null;
-    let closestDist = 0.8;
+    let closestDist = 15;
     for (const entity of this.resourceEntities) {
-      const dx = entity.position.x - w.x;
-      const dy = entity.position.y - w.y;
+      const ex = entity.position.x * SCALE.TERRAIN_TILE_SIZE;
+      const ey = entity.position.y * SCALE.TERRAIN_TILE_SIZE;
+      const dx = ex - wp.x;
+      const dy = ey - wp.y;
       const d = Math.sqrt(dx * dx + dy * dy);
       if (d < closestDist) {
         closest = entity;
@@ -327,13 +369,12 @@ class GameScene extends Phaser.Scene {
   }
 
   getUnitAtPointer() {
-    const w = this.getPointerWorld();
-
+    const wp = this.getPointerWorldPx();
     let closest = null;
-    let closestDist = 0.6;
+    let closestDist = SCALE.UNIT_SELECTION_RADIUS_PX + 4;
     for (const u of this.units) {
-      const dx = u.x - w.x;
-      const dy = u.y - w.y;
+      const dx = u.x - wp.x;
+      const dy = u.y - wp.y;
       const d = Math.sqrt(dx * dx + dy * dy);
       if (d < closestDist) {
         closest = u;
@@ -344,12 +385,12 @@ class GameScene extends Phaser.Scene {
   }
 
   onPointerDown(pointer) {
-    const w = this.getPointerWorld();
+    const wp = this.getPointerWorldPx();
 
     if (pointer.leftButtonDown()) {
       if (this.placementMode) {
         if (this.ghostValid) {
-          this.placeBuilding(this.placementMode.type, this.ghostTileX, this.ghostTileY, this.placementMode.width, this.placementMode.height);
+          this.placeBuilding(this.placementMode.type, this.ghostBuildX, this.ghostBuildY);
           this.cancelBuildingPlacement();
         }
         return;
@@ -379,8 +420,8 @@ class GameScene extends Phaser.Scene {
     } else if (pointer.rightButtonDown()) {
       if (this.selectedUnits.length > 0) {
         for (const unit of this.selectedUnits) {
-          unit.targetX = w.x;
-          unit.targetY = w.y;
+          unit.targetX = wp.x;
+          unit.targetY = wp.y;
           unit.state = 'moving';
         }
       }
@@ -394,70 +435,79 @@ class GameScene extends Phaser.Scene {
     this.selectedUnits = [];
   }
 
-  placeBuilding(type, tileX, tileY, w, h) {
+  placeBuilding(type, buildX, buildY) {
+    const def = BUILDING_DEFS[type];
     const building = {
       id: `building_${this.nextBuildingId++}`,
       ownerId: this.playerId,
       type,
-      tileX,
-      tileY,
-      width: w,
-      height: h,
-      hp: 1000,
+      buildX, buildY,
+      footprintW: def.w, footprintH: def.h,
+      worldX: buildX * SCALE.BUILD_CELL_SIZE,
+      worldY: buildY * SCALE.BUILD_CELL_SIZE,
+      hp: def.hp,
     };
-    this.buildings.push(building);
 
-    for (let dx = 0; dx < w; dx++) {
-      for (let dy = 0; dy < h; dy++) {
-        const x = tileX + dx;
-        const y = tileY + dy;
-        if (x < 0 || x >= this.width || y < 0 || y >= this.height) continue;
-        const idx = y * this.width + x;
-        this.tiles[idx].b = false;
-        this.tiles[idx].w = false;
-        this.tiles[idx].occupiedBy = building.id;
+    for (let dx = 0; dx < def.w; dx++) {
+      for (let dy = 0; dy < def.h; dy++) {
+        const gx = buildX + dx;
+        const gy = buildY + dy;
+        if (gx >= 0 && gx < this.buildGridWidth && gy >= 0 && gy < this.buildGridHeight) {
+          const cell = this.buildGrid[gy][gx];
+          cell.buildable = false;
+          cell.pathable = false;
+          cell.occupiedBy = building.id;
+        }
       }
     }
 
+    this.buildings.push(building);
     this.renderBuildings();
 
     if (type === 'town_center') {
       this.spawnStartingVillagers(building);
     }
 
-    console.log(`BUILD PLACED: ${type} at (${tileX}, ${tileY})`);
+    console.log(`BUILD PLACED: ${type} at build (${buildX}, ${buildY}) px (${building.worldX}, ${building.worldY})`);
     return building;
   }
 
   spawnStartingVillagers(tc) {
-    const cx = tc.tileX + tc.width / 2;
-    const cy = tc.tileY + tc.height / 2;
+    const cx = tc.buildX + tc.footprintW / 2;
+    const cy = tc.buildY + tc.footprintH / 2;
     const offsets = [
-      { x: tc.tileX - 1, y: cy },
-      { x: tc.tileX + tc.width + 1, y: cy },
-      { x: cx, y: tc.tileY + tc.height + 1 },
+      { x: -2, y: tc.footprintH / 2 },
+      { x: tc.footprintW + 2, y: tc.footprintH / 2 },
+      { x: tc.footprintW / 2, y: tc.footprintH + 2 },
     ];
 
     for (const off of offsets) {
-      let sx = Math.round(off.x);
-      let sy = Math.round(off.y);
-      const idx = sy * this.width + sx;
-      if (sx < 0 || sx >= this.width || sy < 0 || sy >= this.height || !this.tiles[idx] || this.tiles[idx].t === 1) {
-        for (let r = 1; r < 6; r++) {
+      const sx = (cx + off.x) * SCALE.BUILD_CELL_SIZE;
+      const sy = (cy + off.y) * SCALE.BUILD_CELL_SIZE;
+
+      // validate: check the build cell is pathable
+      const bgx = Math.floor((cx + off.x));
+      const bgy = Math.floor((cy + off.y));
+      let px = sx;
+      let py = sy;
+      if (bgx >= 0 && bgx < this.buildGridWidth && bgy >= 0 && bgy < this.buildGridHeight) {
+        const cell = this.buildGrid[bgy][bgx];
+        if (!cell.pathable) {
+          // find nearest pathable
           let found = false;
-          for (let dx = -r; dx <= r && !found; dx++) {
-            for (let dy = -r; dy <= r && !found; dy++) {
-              const nx = Math.round(cx) + dx;
-              const ny = Math.round(cy) + dy;
-              const nidx = ny * this.width + nx;
-              if (nx >= 0 && nx < this.width && ny >= 0 && ny < this.height && this.tiles[nidx] && this.tiles[nidx].t !== 1) {
-                sx = nx;
-                sy = ny;
-                found = true;
+          for (let r = 1; r < 8 && !found; r++) {
+            for (let dx = -r; dx <= r && !found; dx++) {
+              for (let dy = -r; dy <= r && !found; dy++) {
+                const nx = bgx + dx;
+                const ny = bgy + dy;
+                if (nx >= 0 && nx < this.buildGridWidth && ny >= 0 && ny < this.buildGridHeight && this.buildGrid[ny][nx].pathable) {
+                  px = nx * SCALE.BUILD_CELL_SIZE + SCALE.BUILD_CELL_SIZE / 2;
+                  py = ny * SCALE.BUILD_CELL_SIZE + SCALE.BUILD_CELL_SIZE / 2;
+                  found = true;
+                }
               }
             }
           }
-          if (found) break;
         }
       }
 
@@ -465,25 +515,23 @@ class GameScene extends Phaser.Scene {
         id: `unit_${this.nextUnitId++}`,
         ownerId: this.playerId,
         type: 'villager',
-        x: sx,
-        y: sy,
-        targetX: sx,
-        targetY: sy,
-        speed: 4,
+        x: px, y: py,
+        targetX: px, targetY: py,
+        speed: 80,
         selected: false,
         state: 'idle',
-        carrying: null,
-        carryAmount: 0,
       });
     }
 
     this.renderUnits();
   }
 
-  startBuildingPlacement(type, w, h) {
-    this.placementMode = { type, width: w, height: h };
+  startBuildingPlacement(type) {
+    const def = BUILDING_DEFS[type];
+    if (!def) return;
+    this.placementMode = { type, ...def };
     this.ghostValid = false;
-    console.log(`Placement mode: ${type} (${w}x${h})  Left-click to place, ESC to cancel`);
+    console.log(`Placement: ${def.label} (${def.w}x${def.h} cells = ${(def.w * SCALE.BUILD_CELL_SIZE).toFixed(0)}x${(def.h * SCALE.BUILD_CELL_SIZE).toFixed(0)} px)`);
   }
 
   cancelBuildingPlacement() {
@@ -497,7 +545,7 @@ class GameScene extends Phaser.Scene {
       console.warn('No site found:', siteType);
       return;
     }
-    this.cameras.main.centerOn(site.center.x * TILE_SIZE, site.center.y * TILE_SIZE);
+    this.cameras.main.centerOn(site.center.x * SCALE.TERRAIN_TILE_SIZE, site.center.y * SCALE.TERRAIN_TILE_SIZE);
     this.cameras.main.setZoom(2);
     console.log('Jumped to site:', site);
   }
@@ -508,31 +556,20 @@ class GameScene extends Phaser.Scene {
       console.warn('No resource entity found:', resourceType);
       return;
     }
-    this.cameras.main.centerOn(entity.position.x * TILE_SIZE, entity.position.y * TILE_SIZE);
+    this.cameras.main.centerOn(entity.position.x * SCALE.TERRAIN_TILE_SIZE, entity.position.y * SCALE.TERRAIN_TILE_SIZE);
     this.cameras.main.setZoom(2);
     console.log('Jumped to resource entity:', entity);
   }
 
-  isBuildable(tileX, tileY, w, h) {
-    for (let dx = 0; dx < w; dx++) {
-      for (let dy = 0; dy < h; dy++) {
-        const x = tileX + dx;
-        const y = tileY + dy;
-        if (x < 0 || x >= this.width || y < 0 || y >= this.height) return false;
-
-        const idx = y * this.width + x;
-        const tile = this.tiles[idx];
-        if (!tile || tile.t === 1) return false;
-        if (tile.occupiedBy) return false;
-        if (!tile.b) return false;
-
-        for (const entity of this.resourceEntities) {
-          if (entity.blocksBuilding &&
-              Math.abs(entity.position.x - (x + 0.5)) < 1 &&
-              Math.abs(entity.position.y - (y + 0.5)) < 1) {
-            return false;
-          }
-        }
+  isBuildable(buildX, buildY, fw, fh) {
+    for (let dx = 0; dx < fw; dx++) {
+      for (let dy = 0; dy < fh; dy++) {
+        const gx = buildX + dx;
+        const gy = buildY + dy;
+        if (gx < 0 || gx >= this.buildGridWidth || gy < 0 || gy >= this.buildGridHeight) return false;
+        const cell = this.buildGrid[gy][gx];
+        if (!cell.buildable) return false;
+        if (cell.occupiedBy) return false;
       }
     }
     return true;
@@ -542,15 +579,18 @@ class GameScene extends Phaser.Scene {
     this.placementGraphics.clear();
     if (!this.placementMode) return;
 
-    const { width: w, height: h } = this.placementMode;
-    const px = this.ghostTileX * TILE_SIZE;
-    const py = this.ghostTileY * TILE_SIZE;
+    const px = this.ghostBuildX * SCALE.BUILD_CELL_SIZE;
+    const py = this.ghostBuildY * SCALE.BUILD_CELL_SIZE;
+    const pw = this.placementMode.w * SCALE.BUILD_CELL_SIZE;
+    const ph = this.placementMode.h * SCALE.BUILD_CELL_SIZE;
     const color = this.ghostValid ? 0x00ff00 : 0xff0000;
 
+    this.placementGraphics.lineStyle(1, 0xffffff, 0.3);
+    this.placementGraphics.strokeRect(px, py, pw, ph);
     this.placementGraphics.fillStyle(color, 0.15);
-    this.placementGraphics.fillRect(px, py, w * TILE_SIZE, h * TILE_SIZE);
+    this.placementGraphics.fillRect(px, py, pw, ph);
     this.placementGraphics.lineStyle(2, color, 0.8);
-    this.placementGraphics.strokeRect(px, py, w * TILE_SIZE, h * TILE_SIZE);
+    this.placementGraphics.strokeRect(px, py, pw, ph);
   }
 
   updateUnits(delta) {
@@ -561,7 +601,7 @@ class GameScene extends Phaser.Scene {
       const dy = u.targetY - u.y;
       const dist = Math.sqrt(dx * dx + dy * dy);
 
-      if (dist < 0.05) {
+      if (dist < 1) {
         u.x = u.targetX;
         u.y = u.targetY;
         u.state = 'idle';
@@ -578,7 +618,7 @@ class GameScene extends Phaser.Scene {
     this.updateUnits(delta);
 
     if (this.placementMode) {
-      this.ghostValid = this.isBuildable(this.ghostTileX, this.ghostTileY, this.placementMode.width, this.placementMode.height);
+      this.ghostValid = this.isBuildable(this.ghostBuildX, this.ghostBuildY, this.placementMode.w, this.placementMode.h);
       this.renderBuildingGhost();
     }
 
@@ -588,17 +628,21 @@ class GameScene extends Phaser.Scene {
     const zoom = cam.zoom.toFixed(1);
     const scrollX = Math.floor(cam.scrollX);
     const scrollY = Math.floor(cam.scrollY);
-
     const mouse = this.input.activePointer;
-    const tileX = Math.floor((mouse.x / this.scale.width * cam.width + cam.scrollX) / TILE_SIZE);
-    const tileY = Math.floor((mouse.y / this.scale.height * cam.height + cam.scrollY) / TILE_SIZE);
+    const worldPxX = (mouse.x / this.scale.width * cam.width + cam.scrollX);
+    const worldPxY = (mouse.y / this.scale.height * cam.height + cam.scrollY);
+
+    const tileX = Math.floor(worldPxX / SCALE.TERRAIN_TILE_SIZE);
+    const tileY = Math.floor(worldPxY / SCALE.TERRAIN_TILE_SIZE);
+    const buildX = Math.floor(worldPxX / SCALE.BUILD_CELL_SIZE);
+    const buildY = Math.floor(worldPxY / SCALE.BUILD_CELL_SIZE);
 
     const idx = tileY * this.width + tileX;
     let tileInfo = '';
     if (idx >= 0 && idx < this.tiles.length) {
       const t = this.tiles[idx];
-      const terrainNames = { 0: 'grass', 1: 'water', 2: 'rocky' };
-      tileInfo = `Tile: (${tileX}, ${tileY}) ${terrainNames[t.t] || '?'}`;
+      const names = { 0: 'grass', 1: 'water', 2: 'rocky' };
+      tileInfo = `Tile: (${tileX}, ${tileY}) ${names[t.t] || '?'}  Cell: (${buildX}, ${buildY})`;
     }
 
     let entityInfo = '';
@@ -610,12 +654,13 @@ class GameScene extends Phaser.Scene {
     let unitInfo = '';
     if (this.selectedUnits.length > 0) {
       const u = this.selectedUnits[0];
-      unitInfo = `${u.type}#${u.id.slice(-3)} at (${u.x.toFixed(1)}, ${u.y.toFixed(1)}) ${u.state}`;
+      unitInfo = `${u.type}#${u.id.slice(-3)} px(${u.x.toFixed(0)}, ${u.y.toFixed(0)}) ${u.state}`;
     }
 
     let placementInfo = '';
     if (this.placementMode) {
-      placementInfo = `\nPlace: ${this.placementMode.type} (${this.placementMode.width}x${this.placementMode.height}) at (${this.ghostTileX}, ${this.ghostTileY}) ${this.ghostValid ? 'VALID' : 'BLOCKED'}`;
+      const def = this.placementMode;
+      placementInfo = `\nPlace: ${def.label} (${def.w}x${def.h}) at cell (${this.ghostBuildX}, ${this.ghostBuildY}) ${this.ghostValid ? 'VALID' : 'BLOCKED'}`;
     }
 
     const trees = this.resourceEntities.filter(e => e.type === 'tree').length;
@@ -625,19 +670,18 @@ class GameScene extends Phaser.Scene {
 
     this.debugText.setText([
       `Seed: ${this.seed}`,
-      `Size: ${this.width}x${this.height}`,
+      `Terrain: ${this.width}x${this.height} tiles, ${SCALE.TERRAIN_TILE_SIZE}px`,
+      `Build grid: ${this.buildGridWidth}x${this.buildGridHeight} cells, ${SCALE.BUILD_CELL_SIZE}px`,
       `Zoom: ${zoom}x  Scroll: (${scrollX}, ${scrollY})`,
       `FPS: ${Math.round(this.game.loop.actualFps)}`,
       ``,
-      `Entities received: ${this.resourceEntities.length}`,
-      `Sites received: ${this.resourceSites.length}`,
-      `Entities: trees ${trees}, stone ${stone}, copper ${copper}, iron ${iron}`,
+      `Entities: ${this.resourceEntities.length}  Sites: ${this.resourceSites.length}`,
+      `trees ${trees}, stone ${stone}, copper ${copper}, iron ${iron}`,
       ``,
       `Map: ${this.stats.openBuildablePercent}% open  ${this.stats.waterPercent}% water  ${this.stats.rockyPercent}% rocky`,
       `Forests: ${this.stats.forests} sites, avg ${this.stats.avgTreesPerForest} trees`,
-      `Ore: ${this.stats.oreDepositCount} deposits (S:${this.stats.stoneDeposits} C:${this.stats.copperDeposits} I:${this.stats.ironDeposits})`,
-      `  Trees: ${this.stats.trees}  Nodes: ${this.stats.stoneNodes}S ${this.stats.copperNodes}C ${this.stats.ironNodes}I`,
-      `  Spawns: ${this.stats.validSpawns}`,
+      `Ore: ${this.stats.oreDepositCount} deposits`,
+      `Spawns: ${this.stats.validSpawns}`,
       ``,
       `Buildings: ${this.buildings.length}  Units: ${this.units.length}`,
       tileInfo,

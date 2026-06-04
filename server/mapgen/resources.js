@@ -31,14 +31,6 @@ function isOnGrass(tiles, x, y, width, height) {
   return tiles[tx][ty].terrain === TERRAIN.GRASS;
 }
 
-function markTileBlocked(tiles, x, y, width, height) {
-  const tx = Math.floor(x);
-  const ty = Math.floor(y);
-  if (tx < 0 || tx >= width || ty < 0 || ty >= height) return;
-  tiles[tx][ty].walkable = false;
-  tiles[tx][ty].buildable = false;
-}
-
 function hasRockyNearby(tiles, width, height, cx, cy, range) {
   for (let dx = -range; dx <= range; dx++) {
     for (let dy = -range; dy <= range; dy++) {
@@ -146,12 +138,11 @@ export function generateForests(tiles, width, height, rng, noiseFn) {
         amount: FOREST.treeAmount,
         position: { x: tx, y: ty },
         radius: entityRadius,
+        collisionRadiusPx: 5,
         blocksMovement: true,
         blocksBuilding: true,
         canBeGathered: true,
       });
-
-      markTileBlocked(tiles, tx, ty, width, height);
     }
 
     if (treeIds.length >= FOREST.minRequiredTrees) {
@@ -220,12 +211,11 @@ function generateOreDepositType(tiles, width, height, rng, resourceType, noiseFn
           amount: config.nodeAmount,
           position: { x: nx, y: ny },
           radius: entityRadius,
+          collisionRadiusPx: 7,
           blocksMovement: true,
           blocksBuilding: true,
           canBeGathered: true,
         });
-
-        markTileBlocked(tiles, nx, ny, width, height);
       }
 
       if (nodeIds.length > 0) {

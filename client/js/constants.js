@@ -1,3 +1,22 @@
+const TILE_SIZE = 32;
+
+const SCALE = {
+  TERRAIN_TILE_SIZE: 32,
+  BUILD_CELL_SIZE: 8,
+  BUILD_CELLS_PER_TILE: 4,
+  UNIT_RADIUS_PX: 5,
+  UNIT_SELECTION_RADIUS_PX: 10,
+};
+
+const BUILDING_DEFS = {
+  town_center: { label: 'Town Center', hotkey: 'T', w: 12, h: 12, color: 0xc49a5a, hp: 1500 },
+  house: { label: 'House', hotkey: 'H', w: 5, h: 5, color: 0xd2b48c, hp: 300 },
+  lumber_camp: { label: 'Lumber Camp', hotkey: 'L', w: 7, h: 7, color: 0x8b5a2b, hp: 500 },
+  mining_camp: { label: 'Mining Camp', hotkey: 'M', w: 7, h: 7, color: 0x777777, hp: 500 },
+  barracks: { label: 'Barracks', hotkey: 'B', w: 12, h: 10, color: 0x9a6a3a, hp: 900 },
+  farm: { label: 'Farm', hotkey: 'G', w: 12, h: 12, color: 0xb5a642, hp: 200 },
+};
+
 const TERRAIN_COLORS = {
   0: 0x4a8c3f,
   1: 0x2b6cb0,
@@ -16,5 +35,4 @@ const SITE_COLORS = {
   deposit_site: 0x8b4513,
 };
 
-const TILE_SIZE = 32;
 const MAX_PLAYERS = 8;
