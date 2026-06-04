@@ -94,6 +94,203 @@ class GameScene extends Phaser.Scene {
     }
   }
 
+  worldPxToBuildCell(x, y) {
+    return { x: Math.floor(x / SCALE.BUILD_CELL_SIZE), y: Math.floor(y / SCALE.BUILD_CELL_SIZE) };
+  }
+
+  buildCellToWorldPx(x, y) {
+    return { x: x * SCALE.BUILD_CELL_SIZE + SCALE.BUILD_CELL_SIZE / 2, y: y * SCALE.BUILD_CELL_SIZE + SCALE.BUILD_CELL_SIZE / 2 };
+  }
+
+  isCellPathable(x, y) {
+    if (x < 0 || x >= this.buildGridWidth || y < 0 || y >= this.buildGridHeight) return false;
+    const cell = this.buildGrid[y][x];
+    return !!cell && cell.pathable && !cell.occupiedBy;
+  }
+
+  findPath(startX, startY, goalX, goalY) {
+    const open = [];
+    const closed = new Set();
+
+    const key = (x, y) => `${x},${y}`;
+
+    const heuristic = (x, y) => {
+      const dx = Math.abs(x - goalX);
+      const dy = Math.abs(y - goalY);
+      return Math.min(dx, dy) * 14 + Math.abs(dx - dy) * 10;
+    };
+
+    open.push({ x: startX, y: startY, g: 0, f: heuristic(startX, startY), parent: null });
+
+    const dirs = [
+      { x: 0, y: -1, cost: 10 },
+      { x: 1, y: 0, cost: 10 },
+      { x: 0, y: 1, cost: 10 },
+      { x: -1, y: 0, cost: 10 },
+      { x: 1, y: -1, cost: 14 },
+      { x: 1, y: 1, cost: 14 },
+      { x: -1, y: 1, cost: 14 },
+      { x: -1, y: -1, cost: 14 },
+    ];
+
+    const maxIterations = 50000;
+    let iterations = 0;
+
+    while (open.length > 0 && iterations < maxIterations) {
+      iterations++;
+
+      let bestIdx = 0;
+      for (let i = 1; i < open.length; i++) {
+        if (open[i].f < open[bestIdx].f) bestIdx = i;
+      }
+
+      const current = open.splice(bestIdx, 1)[0];
+      const ck = key(current.x, current.y);
+
+      if (current.x === goalX && current.y === goalY) {
+        const path = [];
+        let node = current;
+        while (node) {
+          path.unshift({ x: node.x, y: node.y });
+          node = node.parent;
+        }
+        return path;
+      }
+
+      closed.add(ck);
+
+      for (const d of dirs) {
+        const nx = current.x + d.x;
+        const ny = current.y + d.y;
+
+        if (!this.isCellPathable(nx, ny)) continue;
+
+        // diagonal corner-cutting prevention
+        if (d.cost === 14) {
+          if (!this.isCellPathable(current.x + d.x, current.y) || !this.isCellPathable(current.x, current.y + d.y)) continue;
+        }
+
+        const nk = key(nx, ny);
+        if (closed.has(nk)) continue;
+
+        const ng = current.g + d.cost;
+
+        const existing = open.find(o => o.x === nx && o.y === ny);
+        if (existing) {
+          if (ng < existing.g) {
+            existing.g = ng;
+            existing.f = ng + heuristic(nx, ny);
+            existing.parent = current;
+          }
+        } else {
+          open.push({ x: nx, y: ny, g: ng, f: ng + heuristic(nx, ny), parent: current });
+        }
+      }
+    }
+
+    return null;
+  }
+
+  simplifyPath(path) {
+    if (!path || path.length <= 2) return path;
+
+    const result = [path[0]];
+    let lastDx = null;
+    let lastDy = null;
+
+    for (let i = 1; i < path.length; i++) {
+      const prev = path[i - 1];
+      const cur = path[i];
+
+      const dx = Math.sign(cur.x - prev.x);
+      const dy = Math.sign(cur.y - prev.y);
+
+      if (lastDx !== null && (dx !== lastDx || dy !== lastDy)) {
+        result.push(prev);
+      }
+
+      lastDx = dx;
+      lastDy = dy;
+    }
+
+    result.push(path[path.length - 1]);
+    return result;
+  }
+
+  pathCellsToWaypoints(path) {
+    return path.map(p => this.buildCellToWorldPx(p.x, p.y));
+  }
+
+  findNearestPathableCell(cx, cy, maxRadius = 12) {
+    if (this.isCellPathable(cx, cy)) return { x: cx, y: cy };
+
+    for (let r = 1; r <= maxRadius; r++) {
+      for (let dx = -r; dx <= r; dx++) {
+        for (let dy = -r; dy <= r; dy++) {
+          const x = cx + dx;
+          const y = cy + dy;
+          if (this.isCellPathable(x, y)) {
+            return { x, y };
+          }
+        }
+      }
+    }
+
+    return null;
+  }
+
+  commandMoveUnit(unit, targetWorldX, targetWorldY) {
+    const start = this.worldPxToBuildCell(unit.x, unit.y);
+    const goal = this.worldPxToBuildCell(targetWorldX, targetWorldY);
+
+    let finalGoal = goal;
+
+    if (!this.isCellPathable(goal.x, goal.y)) {
+      finalGoal = this.findNearestPathableCell(goal.x, goal.y, 12);
+      if (!finalGoal) {
+        console.warn('No pathable target near clicked location');
+        return;
+      }
+    }
+
+    const path = this.findPath(start.x, start.y, finalGoal.x, finalGoal.y);
+
+    if (!path || path.length === 0) {
+      console.warn('No path found', { start, finalGoal });
+      return;
+    }
+
+    const simplified = this.simplifyPath(path);
+    const waypoints = this.pathCellsToWaypoints(simplified);
+
+    unit.path = waypoints;
+    unit.pathIndex = 0;
+    unit.state = 'moving';
+
+    const first = waypoints[0];
+    unit.targetX = first.x;
+    unit.targetY = first.y;
+  }
+
+  renderPaths() {
+    this.pathGraphics.clear();
+
+    for (const u of this.selectedUnits) {
+      if (!u.path || u.path.length === 0) continue;
+
+      this.pathGraphics.lineStyle(2, 0x00ffff, 0.8);
+
+      this.pathGraphics.beginPath();
+      this.pathGraphics.moveTo(u.x, u.y);
+
+      for (let i = u.pathIndex; i < u.path.length; i++) {
+        this.pathGraphics.lineTo(u.path[i].x, u.path[i].y);
+      }
+
+      this.pathGraphics.strokePath();
+    }
+  }
+
   create() {
     if (!this.tiles) {
       this.add.text(this.scale.width / 2, this.scale.height / 2, 'Error: No map data', {
@@ -111,6 +308,7 @@ class GameScene extends Phaser.Scene {
     this.entityGraphics = this.add.graphics().setDepth(10);
     this.buildingGraphics = this.add.graphics().setDepth(12);
     this.spawnGraphics = this.add.graphics().setDepth(20);
+    this.pathGraphics = this.add.graphics().setDepth(25);
     this.unitGraphics = this.add.graphics().setDepth(30);
     this.selectionGraphics = this.add.graphics().setDepth(40);
 
@@ -435,12 +633,11 @@ class GameScene extends Phaser.Scene {
         });
 
         for (const unit of this.selectedUnits) {
-          unit.targetX = wp.x;
-          unit.targetY = wp.y;
-          unit.state = 'moving';
+          this.commandMoveUnit(unit, wp.x, wp.y);
         }
 
         this.renderUnits();
+        this.renderPaths();
       }
     }
   }
@@ -537,6 +734,8 @@ class GameScene extends Phaser.Scene {
         speed: 80,
         selected: false,
         state: 'idle',
+        path: [],
+        pathIndex: 0,
       });
     }
 
@@ -616,14 +815,31 @@ class GameScene extends Phaser.Scene {
     for (const u of this.units) {
       if (u.state !== 'moving') continue;
 
-      const dx = u.targetX - u.x;
-      const dy = u.targetY - u.y;
+      if (!u.path || u.pathIndex >= u.path.length) {
+        u.state = 'idle';
+        u.path = [];
+        u.pathIndex = 0;
+        anyMoved = true;
+        continue;
+      }
+
+      const waypoint = u.path[u.pathIndex];
+
+      const dx = waypoint.x - u.x;
+      const dy = waypoint.y - u.y;
       const dist = Math.sqrt(dx * dx + dy * dy);
 
-      if (dist < 1) {
-        u.x = u.targetX;
-        u.y = u.targetY;
-        u.state = 'idle';
+      if (dist < 2) {
+        u.x = waypoint.x;
+        u.y = waypoint.y;
+        u.pathIndex++;
+
+        if (u.pathIndex >= u.path.length) {
+          u.state = 'idle';
+          u.path = [];
+          u.pathIndex = 0;
+        }
+
         anyMoved = true;
         continue;
       }
@@ -636,6 +852,7 @@ class GameScene extends Phaser.Scene {
 
     if (anyMoved) {
       this.renderUnits();
+      this.renderPaths();
     }
   }
 
