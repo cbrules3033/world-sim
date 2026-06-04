@@ -49,6 +49,7 @@ class LobbyScene extends Phaser.Scene {
         this.updatePlayers();
       }),
       network.on('game_starting', (data) => this.onGameStarting(data)),
+      network.on('map_data', (data) => this.onMapData(data)),
       network.on('room_error', (data) => this.statusText.setText(data.error)),
     ];
   }
@@ -106,6 +107,10 @@ class LobbyScene extends Phaser.Scene {
 
   onGameStarting(data) {
     this.statusText.setText(`Map seed: ${data.seed} (${data.width}x${data.height})`);
+  }
+
+  onMapData(data) {
+    this.scene.start('GameScene', data);
   }
 
   shutdown() {
