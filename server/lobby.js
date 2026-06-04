@@ -174,6 +174,22 @@ function handleStartGame(ws, payload, playerIdMap) {
       stats: mapData.stats,
     });
 
+    for (const e of mapData.resourceEntities.slice(0, 10)) {
+      const tx = Math.floor(e.position.x);
+      const ty = Math.floor(e.position.y);
+      const terrain = mapData.tiles[tx]?.[ty]?.terrain;
+      console.log('ENTITY TERRAIN CHECK:', {
+        id: e.id,
+        type: e.type,
+        resourceType: e.resourceType,
+        x: e.position.x.toFixed(2),
+        y: e.position.y.toFixed(2),
+        tileX: tx,
+        tileY: ty,
+        terrain: terrain === 0 ? 'grass' : terrain === 1 ? 'water' : terrain === 2 ? 'rocky' : '?',
+      });
+    }
+
     for (const [pid, player] of room.players) {
       console.log('SERVER SENDING MAP_DATA:', {
         playerId: pid,
@@ -226,8 +242,9 @@ function serializeTiles(tiles) {
   const flat = [];
   const w = tiles.length;
   const h = tiles[0].length;
-  for (let x = 0; x < w; x++) {
-    for (let y = 0; y < h; y++) {
+
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
       const t = tiles[x][y];
       flat.push({
         t: t.terrain,
@@ -236,5 +253,6 @@ function serializeTiles(tiles) {
       });
     }
   }
+
   return flat;
 }

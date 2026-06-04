@@ -125,9 +125,6 @@ class GameScene extends Phaser.Scene {
       const py = entity.position.y * TILE_SIZE;
       const r = Math.max(entity.radius * TILE_SIZE, 10);
 
-      eg.fillStyle(0xff00ff, 1);
-      eg.fillCircle(px, py, 4);
-
       switch (entity.type) {
         case 'tree': {
           eg.fillStyle(0x000000, 0.25);
