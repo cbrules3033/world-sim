@@ -18,6 +18,13 @@ class GameScene extends Phaser.Scene {
     this.spawns = data.spawns || [];
     this.stats = data.stats || {};
 
+    this.playerResources = {
+      wood: 0,
+      stone: 0,
+      copper: 0,
+      iron: 0,
+    };
+
     if (!Array.isArray(data.resourceEntities)) {
       console.error('resourceEntities was missing or not an array:', data.resourceEntities);
     }
@@ -291,6 +298,184 @@ class GameScene extends Phaser.Scene {
     }
   }
 
+  assignGatherTask(unit, entity) {
+    unit.gatherTargetId = entity.id;
+    unit.workState = 'moving_to_resource';
+
+    const point = this.getGatherPointNearEntity(entity, unit);
+    this.commandMoveUnit(unit, point.x, point.y);
+
+    console.log(`${unit.id} assigned to gather ${entity.resourceType} from ${entity.id}`);
+  }
+
+  getGatherPointNearEntity(entity, unit) {
+    const ex = entity.position.x * SCALE.TERRAIN_TILE_SIZE;
+    const ey = entity.position.y * SCALE.TERRAIN_TILE_SIZE;
+
+    const dx = unit.x - ex;
+    const dy = unit.y - ey;
+    const d = Math.sqrt(dx * dx + dy * dy) || 1;
+
+    const standDistance = 14;
+
+    return {
+      x: ex + (dx / d) * standDistance,
+      y: ey + (dy / d) * standDistance,
+    };
+  }
+
+  getResourceEntityById(id) {
+    return this.resourceEntities.find(e => e.id === id);
+  }
+
+  getBuildingById(id) {
+    return this.buildings.find(b => b.id === id);
+  }
+
+  getNearestDropoff(unit, resourceType) {
+    let best = null;
+    let bestDist = Infinity;
+
+    for (const b of this.buildings) {
+      if (b.ownerId !== this.playerId) continue;
+
+      const acceptsWood = b.type === 'town_center' || b.type === 'lumber_camp';
+      if (resourceType === 'wood' && !acceptsWood) continue;
+
+      const bx = b.worldX + (b.footprintW * SCALE.BUILD_CELL_SIZE) / 2;
+      const by = b.worldY + (b.footprintH * SCALE.BUILD_CELL_SIZE) / 2;
+
+      const dx = bx - unit.x;
+      const dy = by - unit.y;
+      const d = Math.sqrt(dx * dx + dy * dy);
+
+      if (d < bestDist) {
+        best = b;
+        bestDist = d;
+      }
+    }
+
+    return best;
+  }
+
+  getDropoffPointNearBuilding(building, unit) {
+    const left = building.worldX;
+    const right = building.worldX + building.footprintW * SCALE.BUILD_CELL_SIZE;
+    const top = building.worldY;
+    const bottom = building.worldY + building.footprintH * SCALE.BUILD_CELL_SIZE;
+
+    const cx = (left + right) / 2;
+    const cy = (top + bottom) / 2;
+
+    const dx = unit.x - cx;
+    const dy = unit.y - cy;
+
+    if (Math.abs(dx) > Math.abs(dy)) {
+      return {
+        x: dx < 0 ? left - 10 : right + 10,
+        y: Phaser.Math.Clamp(unit.y, top, bottom),
+      };
+    }
+
+    return {
+      x: Phaser.Math.Clamp(unit.x, left, right),
+      y: dy < 0 ? top - 10 : bottom + 10,
+    };
+  }
+
+  updateVillagerWork(unit, delta) {
+    if (unit.type !== 'villager') return;
+
+    if (unit.workState === 'moving_to_resource' && unit.state === 'idle') {
+      unit.workState = 'gathering';
+      unit.gatherTimer = 0;
+    }
+
+    if (unit.workState === 'gathering') {
+      this.updateGathering(unit, delta);
+    }
+
+    if (unit.workState === 'moving_to_dropoff' && unit.state === 'idle') {
+      this.depositCarriedResources(unit);
+    }
+  }
+
+  updateGathering(unit, delta) {
+    const entity = this.getResourceEntityById(unit.gatherTargetId);
+
+    if (!entity || entity.amount <= 0) {
+      unit.workState = 'idle';
+      unit.gatherTargetId = null;
+      return;
+    }
+
+    unit.gatherTimer += delta;
+
+    const gatherInterval = 800;
+    if (unit.gatherTimer < gatherInterval) return;
+
+    unit.gatherTimer = 0;
+
+    const amount = Math.min(2, entity.amount, unit.carryCapacity - unit.carryAmount);
+
+    entity.amount -= amount;
+    unit.carryResource = entity.resourceType;
+    unit.carryAmount += amount;
+
+    if (entity.amount <= 0) {
+      this.removeResourceEntity(entity.id);
+    }
+
+    if (unit.carryAmount >= unit.carryCapacity) {
+      const dropoff = this.getNearestDropoff(unit, unit.carryResource);
+
+      if (!dropoff) {
+        unit.workState = 'idle';
+        return;
+      }
+
+      unit.dropoffTargetId = dropoff.id;
+      unit.workState = 'moving_to_dropoff';
+
+      const point = this.getDropoffPointNearBuilding(dropoff, unit);
+      this.commandMoveUnit(unit, point.x, point.y);
+    }
+  }
+
+  depositCarriedResources(unit) {
+    if (!unit.carryResource || unit.carryAmount <= 0) {
+      unit.workState = 'idle';
+      return;
+    }
+
+    this.playerResources[unit.carryResource] += unit.carryAmount;
+
+    const oldTargetId = unit.gatherTargetId;
+
+    unit.carryResource = null;
+    unit.carryAmount = 0;
+    unit.dropoffTargetId = null;
+
+    const target = this.getResourceEntityById(oldTargetId);
+
+    if (target && target.amount > 0) {
+      this.assignGatherTask(unit, target);
+    } else {
+      unit.workState = 'idle';
+      unit.gatherTargetId = null;
+    }
+  }
+
+  removeResourceEntity(id) {
+    const index = this.resourceEntities.findIndex(e => e.id === id);
+    if (index === -1) return;
+
+    this.resourceEntities.splice(index, 1);
+    this.renderEntities();
+
+    console.log(`Resource depleted: ${id}`);
+  }
+
   create() {
     if (!this.tiles) {
       this.add.text(this.scale.width / 2, this.scale.height / 2, 'Error: No map data', {
@@ -481,7 +666,11 @@ class GameScene extends Phaser.Scene {
     this.selectionGraphics.clear();
 
     for (const u of this.units) {
-      const fill = u.selected ? 0xffffff : 0xffffcc;
+      let fill = 0xffffcc;
+      if (u.selected) fill = 0xffffff;
+      if (u.workState === 'gathering') fill = 0x66ff66;
+      if (u.carryResource === 'wood') fill = 0xc49a5a;
+
       this.unitGraphics.fillStyle(fill, 1);
       this.unitGraphics.fillCircle(u.x, u.y, SCALE.UNIT_RADIUS_PX);
       this.unitGraphics.lineStyle(1, 0x333333, 1);
@@ -625,6 +814,19 @@ class GameScene extends Phaser.Scene {
     }
 
     if (isRightClick) {
+      const entity = this.getEntityAtPointer(pointer);
+
+      if (this.selectedUnits.length > 0 && entity && entity.type === 'tree') {
+        for (const unit of this.selectedUnits) {
+          if (unit.type === 'villager') {
+            this.assignGatherTask(unit, entity);
+          }
+        }
+        this.renderUnits();
+        this.renderPaths();
+        return;
+      }
+
       if (this.selectedUnits.length > 0) {
         console.log('Move command:', {
           selectedUnits: this.selectedUnits.length,
@@ -736,6 +938,13 @@ class GameScene extends Phaser.Scene {
         state: 'idle',
         path: [],
         pathIndex: 0,
+        carryResource: null,
+        carryAmount: 0,
+        carryCapacity: 10,
+        workState: 'idle',
+        gatherTargetId: null,
+        dropoffTargetId: null,
+        gatherTimer: 0,
       });
     }
 
@@ -850,6 +1059,10 @@ class GameScene extends Phaser.Scene {
       anyMoved = true;
     }
 
+    for (const u of this.units) {
+      this.updateVillagerWork(u, delta);
+    }
+
     if (anyMoved) {
       this.renderUnits();
       this.renderPaths();
@@ -894,7 +1107,7 @@ class GameScene extends Phaser.Scene {
     let unitInfo = '';
     if (this.selectedUnits.length > 0) {
       const u = this.selectedUnits[0];
-      unitInfo = `${u.type}#${u.id.slice(-3)} px(${u.x.toFixed(0)}, ${u.y.toFixed(0)}) ${u.state}`;
+      unitInfo = `${u.type}#${u.id.slice(-3)} ${u.state}/${u.workState} carrying ${u.carryAmount}/${u.carryCapacity} ${u.carryResource || ''}`;
     }
 
     let placementInfo = '';
@@ -923,6 +1136,7 @@ class GameScene extends Phaser.Scene {
       `Ore: ${this.stats.oreDepositCount} deposits`,
       `Spawns: ${this.stats.validSpawns}`,
       ``,
+      `Resources: W:${this.playerResources.wood} S:${this.playerResources.stone} C:${this.playerResources.copper} I:${this.playerResources.iron}`,
       `Buildings: ${this.buildings.length}  Units: ${this.units.length}`,
       tileInfo,
       entityInfo,
