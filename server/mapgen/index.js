@@ -1,4 +1,4 @@
-import { TERRAIN, RESOURCE_TYPES } from '../../shared/constants.js';
+import { TERRAIN, RESOURCE_TYPES, SPAWN_CLEAR_RADIUS } from '../../shared/constants.js';
 import { createRng } from './rng.js';
 import { makeNoise } from './noise.js';
 import { generateTerrain } from './terrain.js';
@@ -105,16 +105,25 @@ function computeStats(tiles, width, height, resourceSites, resourceEntities) {
 }
 
 function clearSpawnZones(tiles, spawns, resourceEntities) {
-  const radius = Math.floor(5 / 2);
+  const clearRadius = Math.floor(SPAWN_CLEAR_RADIUS * 0.6);
   for (const spawn of spawns) {
-    for (let dx = -radius; dx <= radius; dx++) {
-      for (let dy = -radius; dy <= radius; dy++) {
-        const nx = spawn.x + dx;
-        const ny = spawn.y + dy;
+    const sx = spawn.x;
+    const sy = spawn.y;
+
+    for (let dx = -clearRadius; dx <= clearRadius; dx++) {
+      for (let dy = -clearRadius; dy <= clearRadius; dy++) {
+        const nx = sx + dx;
+        const ny = sy + dy;
         if (nx < 0 || nx >= tiles.length || ny < 0 || ny >= tiles[0].length) continue;
-        const tile = tiles[nx][ny];
-        tile.walkable = true;
-        tile.buildable = true;
+        tiles[nx][ny].walkable = true;
+        tiles[nx][ny].buildable = true;
+      }
+    }
+
+    for (let i = resourceEntities.length - 1; i >= 0; i--) {
+      const e = resourceEntities[i];
+      if (Math.abs(e.position.x - sx) <= clearRadius && Math.abs(e.position.y - sy) <= clearRadius) {
+        resourceEntities.splice(i, 1);
       }
     }
   }
