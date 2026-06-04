@@ -300,6 +300,7 @@ class GameScene extends Phaser.Scene {
 
   assignGatherTask(unit, entity) {
     unit.gatherTargetId = entity.id;
+    unit.gatherResourceType = entity.resourceType;
     unit.workState = 'moving_to_resource';
 
     const point = this.getGatherPointNearEntity(entity, unit);
@@ -383,6 +384,47 @@ class GameScene extends Phaser.Scene {
     };
   }
 
+  findNearestResourceEntity(unit, resourceType, maxDistancePx = 500) {
+    let best = null;
+    let bestDist = Infinity;
+
+    for (const entity of this.resourceEntities) {
+      if (!entity.canBeGathered) continue;
+      if (entity.resourceType !== resourceType) continue;
+      if (entity.amount <= 0) continue;
+
+      const ex = entity.position.x * SCALE.TERRAIN_TILE_SIZE;
+      const ey = entity.position.y * SCALE.TERRAIN_TILE_SIZE;
+
+      const dx = ex - unit.x;
+      const dy = ey - unit.y;
+      const d = Math.sqrt(dx * dx + dy * dy);
+
+      if (d < bestDist && d <= maxDistancePx) {
+        best = entity;
+        bestDist = d;
+      }
+    }
+
+    return best;
+  }
+
+  continueGatheringSameResource(unit) {
+    const resourceType = unit.gatherResourceType || unit.carryResource || 'wood';
+
+    const next = this.findNearestResourceEntity(unit, resourceType, 500);
+
+    if (next) {
+      this.assignGatherTask(unit, next);
+      return true;
+    }
+
+    unit.workState = 'idle';
+    unit.gatherTargetId = null;
+    unit.gatherResourceType = null;
+    return false;
+  }
+
   updateVillagerWork(unit, delta) {
     if (unit.type !== 'villager') return;
 
@@ -404,8 +446,7 @@ class GameScene extends Phaser.Scene {
     const entity = this.getResourceEntityById(unit.gatherTargetId);
 
     if (!entity || entity.amount <= 0) {
-      unit.workState = 'idle';
-      unit.gatherTargetId = null;
+      this.continueGatheringSameResource(unit);
       return;
     }
 
@@ -461,8 +502,7 @@ class GameScene extends Phaser.Scene {
     if (target && target.amount > 0) {
       this.assignGatherTask(unit, target);
     } else {
-      unit.workState = 'idle';
-      unit.gatherTargetId = null;
+      this.continueGatheringSameResource(unit);
     }
   }
 
@@ -707,7 +747,17 @@ class GameScene extends Phaser.Scene {
   }
 
   createUI() {
-    this.debugPanel = this.add.container(10, 10);
+    this.resourceHud = this.add.container(10, 10);
+    this.resourceHud.setScrollFactor(0);
+    this.resourceHud.setDepth(200);
+
+    const hudBg = this.add.rectangle(0, 0, 360, 34, 0x000000, 0.65).setOrigin(0, 0);
+    this.resourceHudText = this.add.text(10, 8, '', {
+      fontSize: '14px', color: '#ffffff', fontFamily: 'monospace',
+    });
+    this.resourceHud.add([hudBg, this.resourceHudText]);
+
+    this.debugPanel = this.add.container(10, 50);
     this.debugPanel.setScrollFactor(0);
     this.debugPanel.setDepth(100);
 
@@ -725,6 +775,13 @@ class GameScene extends Phaser.Scene {
       'F:Forest  O:Stone  C:Copper  I:Iron  | ESC:Cancel', {
       fontSize: '11px', color: '#555', fontFamily: 'monospace'
     }).setScrollFactor(0).setDepth(100);
+  }
+
+  updateResourceHud() {
+    if (!this.resourceHudText) return;
+    this.resourceHudText.setText(
+      `Wood: ${this.playerResources.wood}   Stone: ${this.playerResources.stone}   Copper: ${this.playerResources.copper}   Iron: ${this.playerResources.iron}`
+    );
   }
 
   toggleDebug() {
@@ -835,6 +892,11 @@ class GameScene extends Phaser.Scene {
         });
 
         for (const unit of this.selectedUnits) {
+          unit.workState = 'idle';
+          unit.gatherTargetId = null;
+          unit.gatherResourceType = null;
+          unit.dropoffTargetId = null;
+          unit.gatherTimer = 0;
           this.commandMoveUnit(unit, wp.x, wp.y);
         }
 
@@ -943,6 +1005,7 @@ class GameScene extends Phaser.Scene {
         carryCapacity: 10,
         workState: 'idle',
         gatherTargetId: null,
+        gatherResourceType: null,
         dropoffTargetId: null,
         gatherTimer: 0,
       });
@@ -1071,6 +1134,7 @@ class GameScene extends Phaser.Scene {
 
   update(time, delta) {
     this.updateUnits(delta);
+    this.updateResourceHud();
 
     if (this.placementMode) {
       this.ghostValid = this.isBuildable(this.ghostBuildX, this.ghostBuildY, this.placementMode.w, this.placementMode.h);
