@@ -36,3 +36,34 @@ const SITE_COLORS = {
 };
 
 const MAX_PLAYERS = 8;
+
+const RESOURCE_GATHER_RULES = {
+  wood: {
+    gatherIntervalMs: 800,
+    gatherAmount: 2,
+    carryCapacity: 10,
+    validDropoffs: ['town_center', 'lumber_camp'],
+    actionName: 'chopping',
+  },
+  stone: {
+    gatherIntervalMs: 900,
+    gatherAmount: 2,
+    carryCapacity: 10,
+    validDropoffs: ['town_center', 'mining_camp'],
+    actionName: 'mining',
+  },
+  copper: {
+    gatherIntervalMs: 1000,
+    gatherAmount: 2,
+    carryCapacity: 10,
+    validDropoffs: ['town_center', 'mining_camp'],
+    actionName: 'mining',
+  },
+  iron: {
+    gatherIntervalMs: 1100,
+    gatherAmount: 2,
+    carryCapacity: 10,
+    validDropoffs: ['town_center', 'mining_camp'],
+    actionName: 'mining',
+  },
+};

@@ -299,14 +299,26 @@ class GameScene extends Phaser.Scene {
   }
 
   assignGatherTask(unit, entity) {
+    if (!entity || !entity.canBeGathered || entity.amount <= 0 || !entity.resourceType) {
+      return;
+    }
+
+    const rules = RESOURCE_GATHER_RULES[entity.resourceType];
+    if (!rules) {
+      console.warn('No gather rules for resource:', entity.resourceType);
+      return;
+    }
+
     unit.gatherTargetId = entity.id;
     unit.gatherResourceType = entity.resourceType;
+    unit.carryCapacity = rules.carryCapacity;
     unit.workState = 'moving_to_resource';
+    unit.gatherTimer = 0;
 
     const point = this.getGatherPointNearEntity(entity, unit);
     this.commandMoveUnit(unit, point.x, point.y);
 
-    console.log(`${unit.id} assigned to gather ${entity.resourceType} from ${entity.id}`);
+    console.log(`${unit.id} assigned to ${rules.actionName} ${entity.resourceType} from ${entity.id}`);
   }
 
   getGatherPointNearEntity(entity, unit) {
@@ -317,7 +329,8 @@ class GameScene extends Phaser.Scene {
     const dy = unit.y - ey;
     const d = Math.sqrt(dx * dx + dy * dy) || 1;
 
-    const standDistance = 14;
+    const collisionRadius = entity.collisionRadiusPx || 8;
+    const standDistance = collisionRadius + SCALE.UNIT_RADIUS_PX + 4;
 
     return {
       x: ex + (dx / d) * standDistance,
@@ -334,14 +347,19 @@ class GameScene extends Phaser.Scene {
   }
 
   getNearestDropoff(unit, resourceType) {
+    const rules = RESOURCE_GATHER_RULES[resourceType];
+
+    if (!rules) {
+      console.warn('No dropoff rules for resource:', resourceType);
+      return null;
+    }
+
     let best = null;
     let bestDist = Infinity;
 
     for (const b of this.buildings) {
       if (b.ownerId !== this.playerId) continue;
-
-      const acceptsWood = b.type === 'town_center' || b.type === 'lumber_camp';
-      if (resourceType === 'wood' && !acceptsWood) continue;
+      if (!rules.validDropoffs.includes(b.type)) continue;
 
       const bx = b.worldX + (b.footprintW * SCALE.BUILD_CELL_SIZE) / 2;
       const by = b.worldY + (b.footprintH * SCALE.BUILD_CELL_SIZE) / 2;
@@ -384,6 +402,47 @@ class GameScene extends Phaser.Scene {
     };
   }
 
+  clearUnitWork(unit) {
+    unit.workState = 'idle';
+    unit.gatherTargetId = null;
+    unit.gatherResourceType = null;
+    unit.dropoffTargetId = null;
+    unit.gatherTimer = 0;
+  }
+
+  sendUnitToDropoff(unit) {
+    if (!unit.carryResource || unit.carryAmount <= 0) {
+      unit.workState = 'idle';
+      return false;
+    }
+
+    const dropoff = this.getNearestDropoff(unit, unit.carryResource);
+
+    if (!dropoff) {
+      console.warn('No dropoff found for:', unit.carryResource);
+      unit.workState = 'idle';
+      return false;
+    }
+
+    unit.dropoffTargetId = dropoff.id;
+    unit.workState = 'moving_to_dropoff';
+
+    const point = this.getDropoffPointNearBuilding(dropoff, unit);
+    this.commandMoveUnit(unit, point.x, point.y);
+
+    return true;
+  }
+
+  getCarryColor(resourceType) {
+    switch (resourceType) {
+      case 'wood': return 0xc49a5a;
+      case 'stone': return 0xaaaaaa;
+      case 'copper': return 0xcd7f32;
+      case 'iron': return 0x555555;
+      default: return 0xffffcc;
+    }
+  }
+
   findNearestResourceEntity(unit, resourceType, maxDistancePx = 500) {
     let best = null;
     let bestDist = Infinity;
@@ -410,7 +469,13 @@ class GameScene extends Phaser.Scene {
   }
 
   continueGatheringSameResource(unit) {
-    const resourceType = unit.gatherResourceType || unit.carryResource || 'wood';
+    const resourceType = unit.gatherResourceType || unit.carryResource;
+
+    if (!resourceType) {
+      unit.workState = 'idle';
+      unit.gatherTargetId = null;
+      return false;
+    }
 
     const next = this.findNearestResourceEntity(unit, resourceType, 500);
 
@@ -450,17 +515,34 @@ class GameScene extends Phaser.Scene {
       return;
     }
 
+    const resourceType = entity.resourceType;
+    const rules = RESOURCE_GATHER_RULES[resourceType];
+
+    if (!rules) {
+      console.warn('No gather rules for:', resourceType);
+      unit.workState = 'idle';
+      unit.gatherTargetId = null;
+      unit.gatherResourceType = null;
+      return;
+    }
+
     unit.gatherTimer += delta;
 
-    const gatherInterval = 800;
-    if (unit.gatherTimer < gatherInterval) return;
+    if (unit.gatherTimer < rules.gatherIntervalMs) return;
 
     unit.gatherTimer = 0;
 
-    const amount = Math.min(2, entity.amount, unit.carryCapacity - unit.carryAmount);
+    const remainingCapacity = unit.carryCapacity - unit.carryAmount;
+
+    if (remainingCapacity <= 0) {
+      this.sendUnitToDropoff(unit);
+      return;
+    }
+
+    const amount = Math.min(rules.gatherAmount, entity.amount, remainingCapacity);
 
     entity.amount -= amount;
-    unit.carryResource = entity.resourceType;
+    unit.carryResource = resourceType;
     unit.carryAmount += amount;
 
     if (entity.amount <= 0) {
@@ -468,18 +550,7 @@ class GameScene extends Phaser.Scene {
     }
 
     if (unit.carryAmount >= unit.carryCapacity) {
-      const dropoff = this.getNearestDropoff(unit, unit.carryResource);
-
-      if (!dropoff) {
-        unit.workState = 'idle';
-        return;
-      }
-
-      unit.dropoffTargetId = dropoff.id;
-      unit.workState = 'moving_to_dropoff';
-
-      const point = this.getDropoffPointNearBuilding(dropoff, unit);
-      this.commandMoveUnit(unit, point.x, point.y);
+      this.sendUnitToDropoff(unit);
     }
   }
 
@@ -489,21 +560,24 @@ class GameScene extends Phaser.Scene {
       return;
     }
 
-    this.playerResources[unit.carryResource] += unit.carryAmount;
-
+    const depositedResource = unit.carryResource;
     const oldTargetId = unit.gatherTargetId;
+
+    this.playerResources[depositedResource] += unit.carryAmount;
 
     unit.carryResource = null;
     unit.carryAmount = 0;
     unit.dropoffTargetId = null;
 
-    const target = this.getResourceEntityById(oldTargetId);
+    const oldTarget = this.getResourceEntityById(oldTargetId);
 
-    if (target && target.amount > 0) {
-      this.assignGatherTask(unit, target);
-    } else {
-      this.continueGatheringSameResource(unit);
+    if (oldTarget && oldTarget.amount > 0) {
+      this.assignGatherTask(unit, oldTarget);
+      return;
     }
+
+    unit.gatherResourceType = depositedResource;
+    this.continueGatheringSameResource(unit);
   }
 
   unblockBuildCellsForEntity(entityId) {
@@ -737,9 +811,9 @@ class GameScene extends Phaser.Scene {
 
     for (const u of this.units) {
       let fill = 0xffffcc;
-      if (u.selected) fill = 0xffffff;
       if (u.workState === 'gathering') fill = 0x66ff66;
-      if (u.carryResource === 'wood') fill = 0xc49a5a;
+      if (u.carryResource) fill = this.getCarryColor(u.carryResource);
+      if (u.selected) fill = 0xffffff;
 
       this.unitGraphics.fillStyle(fill, 1);
       this.unitGraphics.fillCircle(u.x, u.y, SCALE.UNIT_RADIUS_PX);
@@ -903,7 +977,13 @@ class GameScene extends Phaser.Scene {
     if (isRightClick) {
       const entity = this.getEntityAtPointer(pointer);
 
-      if (this.selectedUnits.length > 0 && entity && entity.type === 'tree') {
+      if (
+        this.selectedUnits.length > 0 &&
+        entity &&
+        entity.canBeGathered &&
+        entity.amount > 0 &&
+        entity.resourceType
+      ) {
         for (const unit of this.selectedUnits) {
           if (unit.type === 'villager') {
             this.assignGatherTask(unit, entity);
@@ -922,11 +1002,7 @@ class GameScene extends Phaser.Scene {
         });
 
         for (const unit of this.selectedUnits) {
-          unit.workState = 'idle';
-          unit.gatherTargetId = null;
-          unit.gatherResourceType = null;
-          unit.dropoffTargetId = null;
-          unit.gatherTimer = 0;
+          this.clearUnitWork(unit);
           this.commandMoveUnit(unit, wp.x, wp.y);
         }
 
@@ -1201,7 +1277,7 @@ class GameScene extends Phaser.Scene {
     let unitInfo = '';
     if (this.selectedUnits.length > 0) {
       const u = this.selectedUnits[0];
-      unitInfo = `${u.type}#${u.id.slice(-3)} ${u.state}/${u.workState} carrying ${u.carryAmount}/${u.carryCapacity} ${u.carryResource || ''}`;
+      unitInfo = `${u.type}#${u.id.slice(-3)} ${u.state}/${u.workState} carry:${u.carryAmount}/${u.carryCapacity} ${u.carryResource || ''} job:${u.gatherResourceType || ''}`;
     }
 
     let placementInfo = '';
