@@ -1,15 +1,17 @@
 import { TERRAIN } from '../../shared/constants.js';
 
-export function generateTerrain(width, height, rng, noiseFn) {
+export function generateTerrain(width, height, rng, terrainNoise, rockyNoise) {
   const tiles = [];
 
   for (let x = 0; x < width; x++) {
     tiles[x] = [];
     for (let y = 0; y < height; y++) {
-      const n = noiseFn(x, y);
+      const n = terrainNoise(x, y);
       let terrain;
       if (n < 0.32) {
         terrain = TERRAIN.WATER;
+      } else if (rockyNoise && rockyNoise(x, y) > 0.75) {
+        terrain = TERRAIN.ROCKY;
       } else {
         terrain = TERRAIN.GRASS;
       }
@@ -17,7 +19,6 @@ export function generateTerrain(width, height, rng, noiseFn) {
         x,
         y,
         terrain,
-        resource: null,
         walkable: terrain !== TERRAIN.WATER,
         buildable: terrain !== TERRAIN.WATER,
       };

@@ -13,6 +13,8 @@ class GameScene extends Phaser.Scene {
     this.width = data.width;
     this.height = data.height;
     this.tiles = data.tiles;
+    this.resourceSites = data.resourceSites || [];
+    this.resourceEntities = data.resourceEntities || [];
     this.spawns = data.spawns || [];
     this.stats = data.stats || {};
   }
@@ -28,99 +30,116 @@ class GameScene extends Phaser.Scene {
     this.cameras.main.setBackgroundColor(0x111111);
     this.cameras.main.setZoom(1);
 
-    this.graphics = this.add.graphics();
-    this.resourceGraphics = this.add.graphics();
+    this.terrainGraphics = this.add.graphics();
+    this.entityGraphics = this.add.graphics();
+    this.siteGraphics = this.add.graphics();
     this.spawnGraphics = this.add.graphics();
 
-    this.add.text(10, this.scale.height - 30, 'Rendering map...', {
-      fontSize: '14px', color: '#888', fontFamily: 'monospace'
-    }).setScrollFactor(0).setDepth(100);
+    this.debugVisible = true;
+    this.showSiteBounds = true;
+    this.showEntityIcons = true;
 
-    this.renderMap();
+    this.renderTerrain();
+    this.renderEntities();
+    this.renderSiteBounds();
+    this.renderSpawns();
+
     this.setupCamera();
     this.createUI();
 
-    this.debugVisible = true;
-    this.resourceOverlay = true;
-    this.spawnOverlay = true;
-
     this.input.keyboard.on('keydown-BACKTICK', () => this.toggleDebug());
-    this.input.keyboard.on('keydown-ONE', () => { this.resourceOverlay = !this.resourceOverlay; this.renderMap(); });
-    this.input.keyboard.on('keydown-TWO', () => { this.spawnOverlay = !this.spawnOverlay; this.renderSpawns(); });
-
-    console.log('GameScene loaded:', this.width + 'x' + this.height, 'tiles:', this.tiles.length, 'spawns:', this.spawns.length);
+    this.input.keyboard.on('keydown-ONE', () => { this.showSiteBounds = !this.showSiteBounds; this.renderSiteBounds(); });
+    this.input.keyboard.on('keydown-TWO', () => { this.showEntityIcons = !this.showEntityIcons; this.renderEntities(); });
   }
 
-  renderMap() {
-    const g = this.graphics;
+  renderTerrain() {
+    const g = this.terrainGraphics;
     g.clear();
-    this.resourceGraphics.clear();
 
-    const tilesPerCall = 4000;
-    let drawn = 0;
+    const total = this.tiles.length;
+    for (let i = 0; i < total; i++) {
+      const tile = this.tiles[i];
+      const x = (i % this.width) * TILE_SIZE;
+      const y = Math.floor(i / this.width) * TILE_SIZE;
 
-    const drawBatch = () => {
-      try {
-        const end = Math.min(drawn + tilesPerCall, this.tiles.length);
-        for (let i = drawn; i < end; i++) {
-          const tile = this.tiles[i];
-          const x = (i % this.width) * TILE_SIZE;
-          const y = Math.floor(i / this.width) * TILE_SIZE;
+      const color = TERRAIN_COLORS[tile.t] || 0x4a8c3f;
+      g.fillStyle(color, 1);
+      g.fillRect(x, y, TILE_SIZE, TILE_SIZE);
 
-          const color = TERRAIN_COLORS[tile.t] || 0x4a8c3f;
-          g.fillStyle(color, 1);
-          g.fillRect(x, y, TILE_SIZE, TILE_SIZE);
-
-          if (tile.t === 1) {
-            g.lineStyle(1, 0x1a4a7a, 0.3);
-            g.strokeRect(x, y, TILE_SIZE, TILE_SIZE);
-          }
-
-          if (this.resourceOverlay && tile.r) {
-            this.drawResource(tile.r, x, y);
-          }
-        }
-        drawn = end;
-        if (drawn < this.tiles.length) {
-          this.time.delayedCall(0, drawBatch);
-        } else {
-          this.renderSpawns();
-        }
-      } catch (e) {
-        console.error('Render error:', e);
+      if (tile.t === 1) {
+        g.lineStyle(1, 0x1a4a7a, 0.3);
+        g.strokeRect(x, y, TILE_SIZE, TILE_SIZE);
       }
-    };
 
-    drawBatch();
+      if (tile.t === 2) {
+        g.fillStyle(0x5a4a3f, 0.4);
+        g.fillCircle(x + TILE_SIZE / 2, y + TILE_SIZE / 2, 3);
+      }
+    }
   }
 
-  drawResource(resource, x, y) {
-    const rg = this.resourceGraphics;
-    const cx = x + TILE_SIZE / 2;
-    const cy = y + TILE_SIZE / 2;
-    const s = TILE_SIZE * 0.35;
+  renderEntities() {
+    this.entityGraphics.clear();
+    if (!this.showEntityIcons) return;
 
-    switch (resource.t) {
-      case 'tree':
-        rg.fillStyle(RESOURCE_COLORS.tree, 0.8);
-        rg.fillTriangle(cx, cy - s, cx - s, cy + s, cx + s, cy + s);
-        break;
-      case 'stone':
-        rg.fillStyle(RESOURCE_COLORS.stone, 0.9);
-        rg.fillCircle(cx, cy, s * 0.7);
-        break;
-      case 'iron':
-        rg.fillStyle(RESOURCE_COLORS.iron, 1);
-        rg.fillRect(cx - s * 0.5, cy - s * 0.5, s, s);
-        rg.fillStyle(0x440000, 0.5);
-        rg.fillRect(cx - s * 0.3, cy - s * 0.3, s * 0.6, s * 0.6);
-        break;
+    const eg = this.entityGraphics;
+
+    for (const entity of this.resourceEntities) {
+      const px = entity.position.x * TILE_SIZE;
+      const py = entity.position.y * TILE_SIZE;
+      const r = entity.radius * TILE_SIZE;
+
+      switch (entity.type) {
+        case 'tree': {
+          const color = ENTITY_COLORS.tree;
+          eg.fillStyle(color, 0.85);
+          eg.fillTriangle(px, py - r, px - r * 0.8, py + r * 0.5, px + r * 0.8, py + r * 0.5);
+          eg.fillStyle(0x1a3a1a, 0.6);
+          eg.fillRect(px - r * 0.1, py + r * 0.3, r * 0.2, r * 0.4);
+          break;
+        }
+        case 'ore_node': {
+          const color = ENTITY_COLORS[entity.resourceType] || 0x808080;
+          eg.fillStyle(color, 0.9);
+          eg.fillCircle(px - r * 0.25, py + r * 0.1, r * 0.55);
+          eg.fillCircle(px + r * 0.3, py - r * 0.15, r * 0.5);
+          eg.fillCircle(px + r * 0.1, py + r * 0.3, r * 0.4);
+          eg.fillStyle(0x000000, 0.15);
+          eg.fillCircle(px - r * 0.2, py + r * 0.15, r * 0.55);
+          break;
+        }
+      }
+    }
+  }
+
+  renderSiteBounds() {
+    this.siteGraphics.clear();
+    if (!this.showSiteBounds) return;
+
+    const sg = this.siteGraphics;
+
+    for (const site of this.resourceSites) {
+      const px = site.center.x * TILE_SIZE;
+      const py = site.center.y * TILE_SIZE;
+      const r = site.radius * TILE_SIZE;
+
+      const color = SITE_COLORS[site.type] || 0xffffff;
+
+      sg.lineStyle(1, color, 0.35);
+      sg.strokeCircle(px, py, r);
+
+      sg.fillStyle(color, 0.05);
+      sg.fillCircle(px, py, r);
+
+      const label = site.resourceType === 'wood' ? 'FOREST' : site.resourceType.toUpperCase();
+      sg.fillStyle(0x000000, 0.5);
+      sg.fillRect(px - 20, py - 5, 40, 10);
     }
   }
 
   renderSpawns() {
     this.spawnGraphics.clear();
-    if (!this.spawnOverlay || !this.spawns) return;
+    if (!this.spawns) return;
 
     const sg = this.spawnGraphics;
     for (const spawn of this.spawns) {
@@ -157,14 +176,15 @@ class GameScene extends Phaser.Scene {
     this.debugPanel.setScrollFactor(0);
     this.debugPanel.setDepth(100);
 
-    const bg = this.add.rectangle(0, 0, 300, 200, 0x000000, 0.7).setOrigin(0, 0);
+    const bg = this.add.rectangle(0, 0, 340, 240, 0x000000, 0.7).setOrigin(0, 0);
     this.debugText = this.add.text(10, 10, '', {
-      fontSize: '12px', color: '#0f0', fontFamily: 'monospace', lineSpacing: 4, wordWrap: { width: 280 }
+      fontSize: '11px', color: '#0f0', fontFamily: 'monospace', lineSpacing: 3, wordWrap: { width: 320 }
     });
     this.debugPanel.add([bg, this.debugText]);
     this.debugPanel.visible = this.debugVisible;
 
-    this.add.text(10, this.scale.height - 80, '` : Debug  |  1 : Resources  |  2 : Spawns  |  Drag : Pan  |  Scroll : Zoom', {
+    this.add.text(10, this.scale.height - 80,
+      '` : Debug  |  1 : Site Bounds  |  2 : Entities  |  Drag : Pan  |  Scroll : Zoom', {
       fontSize: '11px', color: '#555', fontFamily: 'monospace'
     }).setScrollFactor(0).setDepth(100);
   }
@@ -190,9 +210,20 @@ class GameScene extends Phaser.Scene {
     let tileInfo = '';
     if (idx >= 0 && idx < this.tiles.length) {
       const t = this.tiles[idx];
-      const terrainNames = { 0: 'grass', 1: 'water', 2: 'dirt', 3: 'sand' };
+      const terrainNames = { 0: 'grass', 1: 'water', 2: 'rocky' };
       tileInfo = `Tile: (${tileX}, ${tileY}) ${terrainNames[t.t] || '?'}`;
-      if (t.r) tileInfo += ` [${t.r.t}: ${t.r.a}]`;
+    }
+
+    let entityInfo = '';
+    const mouseWorldX = (mouse.x / this.scale.width * cam.width + cam.scrollX) / TILE_SIZE;
+    const mouseWorldY = (mouse.y / this.scale.height * cam.height + cam.scrollY) / TILE_SIZE;
+    for (const entity of this.resourceEntities) {
+      const dx = entity.position.x - mouseWorldX;
+      const dy = entity.position.y - mouseWorldY;
+      if (dx * dx + dy * dy < 0.5) {
+        entityInfo = `${entity.type}[${entity.resourceType}] amt:${entity.amount} at (${entity.position.x.toFixed(1)}, ${entity.position.y.toFixed(1)})`;
+        break;
+      }
     }
 
     this.debugText.setText([
@@ -202,13 +233,14 @@ class GameScene extends Phaser.Scene {
       `FPS: ${Math.round(this.game.loop.actualFps)}`,
       ``,
       `Stats:`,
-      `  Water: ${this.stats.water || 0}`,
-      `  Trees: ${this.stats.tree || 0}`,
-      `  Stone: ${this.stats.stone || 0}`,
-      `  Iron: ${this.stats.iron || 0}`,
-      `  Spawns: ${this.stats.validSpawns || 0}`,
+      `  Forests: ${this.stats.forests}  Trees: ${this.stats.trees}`,
+      `  Stone: ${this.stats.stoneDeposits} deposits, ${this.stats.stoneNodes} nodes`,
+      `  Copper: ${this.stats.copperDeposits} deposits, ${this.stats.copperNodes} nodes`,
+      `  Iron: ${this.stats.ironDeposits} deposits, ${this.stats.ironNodes} nodes`,
+      `  Spawns: ${this.stats.validSpawns}`,
       ``,
       tileInfo,
+      entityInfo,
     ].join('\n'));
   }
 }

@@ -1,20 +1,19 @@
 const TERRAIN_COLORS = {
   0: 0x4a8c3f,
   1: 0x2b6cb0,
-  2: 0x8b7355,
-  3: 0xd4b96b,
+  2: 0x6b5b4f,
 };
 
-const RESOURCE_COLORS = {
+const ENTITY_COLORS = {
   tree: 0x2d6a2d,
   stone: 0x808080,
-  iron: 0x8b0000,
+  copper: 0xcd7f32,
+  iron: 0x4a4a4a,
 };
 
-const RESOURCE_ALPHA = {
-  tree: 0.8,
-  stone: 0.9,
-  iron: 1.0,
+const SITE_COLORS = {
+  forest: 0x1a4a1a,
+  deposit_site: 0x8b4513,
 };
 
 const TILE_SIZE = 32;

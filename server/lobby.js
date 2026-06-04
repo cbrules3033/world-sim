@@ -171,6 +171,8 @@ function handleStartGame(ws, payload, playerIdMap) {
         width: mapData.width,
         height: mapData.height,
         tiles: serializeTiles(mapData.tiles),
+        resourceSites: mapData.resourceSites,
+        resourceEntities: mapData.resourceEntities,
         spawns: mapData.spawns,
         stats: mapData.stats,
         playerId: pid,
@@ -202,7 +204,6 @@ function serializeTiles(tiles) {
       const t = tiles[x][y];
       flat.push({
         t: t.terrain,
-        r: t.resource ? { t: t.resource.type, a: t.resource.amount } : null,
         w: t.walkable,
         b: t.buildable,
       });
