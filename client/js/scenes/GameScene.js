@@ -25,6 +25,12 @@ class GameScene extends Phaser.Scene {
       console.error('resourceSites was missing or not an array:', data.resourceSites);
     }
 
+    this.buildings = [];
+    this.units = [];
+    this.selectedUnits = [];
+    this.nextBuildingId = 1;
+    this.nextUnitId = 1;
+
     console.log('MAP DATA RECEIVED:', {
       seed: this.seed,
       size: `${this.width}x${this.height}`,
@@ -52,7 +58,10 @@ class GameScene extends Phaser.Scene {
     this.siteGraphics = this.add.graphics().setDepth(5);
     this.placementGraphics = this.add.graphics().setDepth(7);
     this.entityGraphics = this.add.graphics().setDepth(10);
+    this.buildingGraphics = this.add.graphics().setDepth(12);
     this.spawnGraphics = this.add.graphics().setDepth(20);
+    this.unitGraphics = this.add.graphics().setDepth(30);
+    this.selectionGraphics = this.add.graphics().setDepth(40);
 
     this.debugVisible = true;
     this.showSiteBounds = false;
@@ -70,6 +79,8 @@ class GameScene extends Phaser.Scene {
     this.setupCamera();
     this.createUI();
 
+    this.input.mouse.disableContextMenu();
+
     this.input.keyboard.on('keydown-BACKTICK', () => this.toggleDebug());
     this.input.keyboard.on('keydown-ONE', () => { this.showSiteBounds = !this.showSiteBounds; this.renderSiteBounds(); });
     this.input.keyboard.on('keydown-TWO', () => { this.showEntityIcons = !this.showEntityIcons; this.renderEntities(); });
@@ -86,6 +97,15 @@ class GameScene extends Phaser.Scene {
     this.input.keyboard.on('keydown-O', () => this.jumpToFirstResource('stone'));
 
     this.input.on('pointerdown', (pointer) => this.onPointerDown(pointer));
+  }
+
+  getPointerWorld() {
+    const cam = this.cameras.main;
+    const pointer = this.input.activePointer;
+    return {
+      x: (pointer.x / this.scale.width * cam.width + cam.scrollX) / TILE_SIZE,
+      y: (pointer.y / this.scale.height * cam.height + cam.scrollY) / TILE_SIZE,
+    };
   }
 
   renderTerrain() {
@@ -199,6 +219,48 @@ class GameScene extends Phaser.Scene {
     }
   }
 
+  renderBuildings() {
+    this.buildingGraphics.clear();
+
+    for (const b of this.buildings) {
+      const x = b.tileX * TILE_SIZE;
+      const y = b.tileY * TILE_SIZE;
+      const w = b.width * TILE_SIZE;
+      const h = b.height * TILE_SIZE;
+
+      let color = 0xb08a55;
+      if (b.type === 'town_center') color = 0xc49a5a;
+      if (b.type === 'house') color = 0xd2b48c;
+      if (b.type === 'lumber_camp') color = 0x8b5a2b;
+      if (b.type === 'mining_camp') color = 0x777777;
+
+      this.buildingGraphics.fillStyle(color, 1);
+      this.buildingGraphics.fillRect(x, y, w, h);
+      this.buildingGraphics.lineStyle(2, 0x222222, 0.8);
+      this.buildingGraphics.strokeRect(x, y, w, h);
+    }
+  }
+
+  renderUnits() {
+    this.unitGraphics.clear();
+    this.selectionGraphics.clear();
+
+    for (const u of this.units) {
+      const px = u.x * TILE_SIZE;
+      const py = u.y * TILE_SIZE;
+
+      this.unitGraphics.fillStyle(0xffffcc, 1);
+      this.unitGraphics.fillCircle(px, py, 6);
+      this.unitGraphics.lineStyle(1, 0x333333, 1);
+      this.unitGraphics.strokeCircle(px, py, 6);
+
+      if (u.selected) {
+        this.selectionGraphics.lineStyle(2, 0x00ff00, 1);
+        this.selectionGraphics.strokeCircle(px, py, 10);
+      }
+    }
+  }
+
   setupCamera() {
     const worldW = this.width * TILE_SIZE;
     const worldH = this.height * TILE_SIZE;
@@ -227,7 +289,7 @@ class GameScene extends Phaser.Scene {
     this.debugPanel.setScrollFactor(0);
     this.debugPanel.setDepth(100);
 
-    const bg = this.add.rectangle(0, 0, 340, 240, 0x000000, 0.7).setOrigin(0, 0);
+    const bg = this.add.rectangle(0, 0, 340, 260, 0x000000, 0.7).setOrigin(0, 0);
     this.debugText = this.add.text(10, 10, '', {
       fontSize: '11px', color: '#0f0', fontFamily: 'monospace', lineSpacing: 3, wordWrap: { width: 320 }
     });
@@ -248,16 +310,13 @@ class GameScene extends Phaser.Scene {
   }
 
   getEntityAtPointer() {
-    const cam = this.cameras.main;
-    const pointer = this.input.activePointer;
-    const mx = (pointer.x / this.scale.width * cam.width + cam.scrollX) / TILE_SIZE;
-    const my = (pointer.y / this.scale.height * cam.height + cam.scrollY) / TILE_SIZE;
+    const w = this.getPointerWorld();
 
     let closest = null;
     let closestDist = 0.8;
     for (const entity of this.resourceEntities) {
-      const dx = entity.position.x - mx;
-      const dy = entity.position.y - my;
+      const dx = entity.position.x - w.x;
+      const dy = entity.position.y - w.y;
       const d = Math.sqrt(dx * dx + dy * dy);
       if (d < closestDist) {
         closest = entity;
@@ -267,33 +326,164 @@ class GameScene extends Phaser.Scene {
     return closest;
   }
 
+  getUnitAtPointer() {
+    const w = this.getPointerWorld();
+
+    let closest = null;
+    let closestDist = 0.6;
+    for (const u of this.units) {
+      const dx = u.x - w.x;
+      const dy = u.y - w.y;
+      const d = Math.sqrt(dx * dx + dy * dy);
+      if (d < closestDist) {
+        closest = u;
+        closestDist = d;
+      }
+    }
+    return closest;
+  }
+
   onPointerDown(pointer) {
-    if (pointer.rightButtonDown()) return;
+    const w = this.getPointerWorld();
 
-    if (this.placementMode) {
-      if (this.ghostValid) {
-        console.log(`BUILD PLACED: ${this.placementMode.type} at (${this.ghostTileX}, ${this.ghostTileY})`);
-      } else {
-        console.log(`BUILD BLOCKED: ${this.placementMode.type} cannot be placed at (${this.ghostTileX}, ${this.ghostTileY})`);
+    if (pointer.leftButtonDown()) {
+      if (this.placementMode) {
+        if (this.ghostValid) {
+          this.placeBuilding(this.placementMode.type, this.ghostTileX, this.ghostTileY, this.placementMode.width, this.placementMode.height);
+          this.cancelBuildingPlacement();
+        }
+        return;
       }
-      return;
+
+      this.clearUnitSelection();
+
+      const unit = this.getUnitAtPointer();
+      if (unit) {
+        unit.selected = true;
+        this.selectedUnits = [unit];
+        this.renderUnits();
+        return;
+      }
+
+      const entity = this.getEntityAtPointer();
+      if (entity) {
+        let siteInfo = '';
+        if (entity.depositId) {
+          const site = this.resourceSites.find(s => s.id === entity.depositId);
+          if (site) siteInfo = ` deposit: ${site.id}`;
+        }
+        console.log(`Resource: ${entity.id} type=${entity.type} res=${entity.resourceType} amt=${entity.amount} at (${entity.position.x.toFixed(1)}, ${entity.position.y.toFixed(1)})${siteInfo}`);
+      }
+
+      this.renderUnits();
+    } else if (pointer.rightButtonDown()) {
+      if (this.selectedUnits.length > 0) {
+        for (const unit of this.selectedUnits) {
+          unit.targetX = w.x;
+          unit.targetY = w.y;
+          unit.state = 'moving';
+        }
+      }
+    }
+  }
+
+  clearUnitSelection() {
+    for (const u of this.units) {
+      u.selected = false;
+    }
+    this.selectedUnits = [];
+  }
+
+  placeBuilding(type, tileX, tileY, w, h) {
+    const building = {
+      id: `building_${this.nextBuildingId++}`,
+      ownerId: this.playerId,
+      type,
+      tileX,
+      tileY,
+      width: w,
+      height: h,
+      hp: 1000,
+    };
+    this.buildings.push(building);
+
+    for (let dx = 0; dx < w; dx++) {
+      for (let dy = 0; dy < h; dy++) {
+        const x = tileX + dx;
+        const y = tileY + dy;
+        if (x < 0 || x >= this.width || y < 0 || y >= this.height) continue;
+        const idx = y * this.width + x;
+        this.tiles[idx].b = false;
+        this.tiles[idx].w = false;
+        this.tiles[idx].occupiedBy = building.id;
+      }
     }
 
-    const entity = this.getEntityAtPointer();
-    if (entity) {
-      let siteInfo = '';
-      if (entity.depositId) {
-        const site = this.resourceSites.find(s => s.id === entity.depositId);
-        if (site) siteInfo = ` deposit: ${site.id}`;
-      }
-      console.log(`Selected resource entity: ${entity.id} type=${entity.type} resourceType=${entity.resourceType} amt=${entity.amount} at (${entity.position.x.toFixed(1)}, ${entity.position.y.toFixed(1)})${siteInfo}`);
+    this.renderBuildings();
+
+    if (type === 'town_center') {
+      this.spawnStartingVillagers(building);
     }
+
+    console.log(`BUILD PLACED: ${type} at (${tileX}, ${tileY})`);
+    return building;
+  }
+
+  spawnStartingVillagers(tc) {
+    const cx = tc.tileX + tc.width / 2;
+    const cy = tc.tileY + tc.height / 2;
+    const offsets = [
+      { x: tc.tileX - 1, y: cy },
+      { x: tc.tileX + tc.width + 1, y: cy },
+      { x: cx, y: tc.tileY + tc.height + 1 },
+    ];
+
+    for (const off of offsets) {
+      let sx = Math.round(off.x);
+      let sy = Math.round(off.y);
+      const idx = sy * this.width + sx;
+      if (sx < 0 || sx >= this.width || sy < 0 || sy >= this.height || !this.tiles[idx] || this.tiles[idx].t === 1) {
+        for (let r = 1; r < 6; r++) {
+          let found = false;
+          for (let dx = -r; dx <= r && !found; dx++) {
+            for (let dy = -r; dy <= r && !found; dy++) {
+              const nx = Math.round(cx) + dx;
+              const ny = Math.round(cy) + dy;
+              const nidx = ny * this.width + nx;
+              if (nx >= 0 && nx < this.width && ny >= 0 && ny < this.height && this.tiles[nidx] && this.tiles[nidx].t !== 1) {
+                sx = nx;
+                sy = ny;
+                found = true;
+              }
+            }
+          }
+          if (found) break;
+        }
+      }
+
+      this.units.push({
+        id: `unit_${this.nextUnitId++}`,
+        ownerId: this.playerId,
+        type: 'villager',
+        x: sx,
+        y: sy,
+        targetX: sx,
+        targetY: sy,
+        speed: 4,
+        selected: false,
+        state: 'idle',
+        carrying: null,
+        carryAmount: 0,
+      });
+    }
+
+    this.renderUnits();
   }
 
   startBuildingPlacement(type, w, h) {
     this.placementMode = { type, width: w, height: h };
     this.ghostValid = false;
-    console.log(`Placement mode: ${type} (${w}x${h})`);
+    console.log(`Placement mode: ${type} (${w}x${h})  Left-click to place, ESC to cancel`);
   }
 
   cancelBuildingPlacement() {
@@ -333,6 +523,8 @@ class GameScene extends Phaser.Scene {
         const idx = y * this.width + x;
         const tile = this.tiles[idx];
         if (!tile || tile.t === 1) return false;
+        if (tile.occupiedBy) return false;
+        if (!tile.b) return false;
 
         for (const entity of this.resourceEntities) {
           if (entity.blocksBuilding &&
@@ -361,7 +553,30 @@ class GameScene extends Phaser.Scene {
     this.placementGraphics.strokeRect(px, py, w * TILE_SIZE, h * TILE_SIZE);
   }
 
-  update() {
+  updateUnits(delta) {
+    for (const u of this.units) {
+      if (u.state !== 'moving') continue;
+
+      const dx = u.targetX - u.x;
+      const dy = u.targetY - u.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+
+      if (dist < 0.05) {
+        u.x = u.targetX;
+        u.y = u.targetY;
+        u.state = 'idle';
+        continue;
+      }
+
+      const step = (u.speed * delta) / 1000;
+      u.x += (dx / dist) * Math.min(step, dist);
+      u.y += (dy / dist) * Math.min(step, dist);
+    }
+  }
+
+  update(time, delta) {
+    this.updateUnits(delta);
+
     if (this.placementMode) {
       this.ghostValid = this.isBuildable(this.ghostTileX, this.ghostTileY, this.placementMode.width, this.placementMode.height);
       this.renderBuildingGhost();
@@ -392,6 +607,12 @@ class GameScene extends Phaser.Scene {
       entityInfo = `${entity.type}[${entity.resourceType}] amt:${entity.amount} at (${entity.position.x.toFixed(1)}, ${entity.position.y.toFixed(1)})`;
     }
 
+    let unitInfo = '';
+    if (this.selectedUnits.length > 0) {
+      const u = this.selectedUnits[0];
+      unitInfo = `${u.type}#${u.id.slice(-3)} at (${u.x.toFixed(1)}, ${u.y.toFixed(1)}) ${u.state}`;
+    }
+
     let placementInfo = '';
     if (this.placementMode) {
       placementInfo = `\nPlace: ${this.placementMode.type} (${this.placementMode.width}x${this.placementMode.height}) at (${this.ghostTileX}, ${this.ghostTileY}) ${this.ghostValid ? 'VALID' : 'BLOCKED'}`;
@@ -418,8 +639,10 @@ class GameScene extends Phaser.Scene {
       `  Trees: ${this.stats.trees}  Nodes: ${this.stats.stoneNodes}S ${this.stats.copperNodes}C ${this.stats.ironNodes}I`,
       `  Spawns: ${this.stats.validSpawns}`,
       ``,
+      `Buildings: ${this.buildings.length}  Units: ${this.units.length}`,
       tileInfo,
       entityInfo,
+      unitInfo,
       placementInfo,
     ].join('\n'));
   }
