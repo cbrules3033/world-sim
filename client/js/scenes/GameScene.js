@@ -410,6 +410,46 @@ class GameScene extends Phaser.Scene {
     unit.gatherTimer = 0;
   }
 
+  canAffordCost(cost = {}) {
+    for (const [resource, amount] of Object.entries(cost)) {
+      if ((this.playerResources[resource] || 0) < amount) return false;
+    }
+    return true;
+  }
+
+  spendCost(cost = {}) {
+    if (!this.canAffordCost(cost)) return false;
+    for (const [resource, amount] of Object.entries(cost)) {
+      this.playerResources[resource] -= amount;
+    }
+    this.updateResourceHud();
+    return true;
+  }
+
+  formatCost(cost = {}) {
+    const parts = [];
+    for (const [resource, amount] of Object.entries(cost)) {
+      parts.push(`${resource}:${amount}`);
+    }
+    return parts.length > 0 ? parts.join(' ') : 'free';
+  }
+
+  showFloatingMessage(text, x = 20, y = 90, color = '#ffcc00') {
+    const msg = this.add.text(x, y, text, {
+      fontSize: '14px', color, fontFamily: 'monospace',
+      backgroundColor: '#000000aa', padding: { x: 6, y: 4 },
+    });
+    msg.setScrollFactor(0);
+    msg.setDepth(300);
+    this.tweens.add({
+      targets: msg,
+      alpha: 0,
+      y: y - 20,
+      duration: 1200,
+      onComplete: () => msg.destroy(),
+    });
+  }
+
   sendUnitToDropoff(unit) {
     if (!unit.carryResource || unit.carryAmount <= 0) {
       unit.workState = 'idle';
@@ -942,10 +982,25 @@ class GameScene extends Phaser.Scene {
 
     if (isLeftClick) {
       if (this.placementMode) {
-        if (this.ghostValid) {
-          this.placeBuilding(this.placementMode.type, this.ghostBuildX, this.ghostBuildY);
-          this.cancelBuildingPlacement();
+        if (!this.ghostValid) {
+          console.log('Cannot place building:', {
+            type: this.placementMode.type,
+            cost: this.placementMode.cost,
+            resources: this.playerResources,
+          });
+          return;
         }
+
+        const cost = this.placementMode.cost || {};
+
+        if (!this.spendCost(cost)) {
+          console.log(`Not enough resources for ${this.placementMode.label}. Cost: ${this.formatCost(cost)}`);
+          this.showFloatingMessage(`Need: ${this.formatCost(cost)}`);
+          return;
+        }
+
+        this.placeBuilding(this.placementMode.type, this.ghostBuildX, this.ghostBuildY);
+        this.cancelBuildingPlacement();
         return;
       }
 
@@ -1125,7 +1180,7 @@ class GameScene extends Phaser.Scene {
     if (!def) return;
     this.placementMode = { type, ...def };
     this.ghostValid = false;
-    console.log(`Placement: ${def.label} (${def.w}x${def.h} cells = ${(def.w * SCALE.BUILD_CELL_SIZE).toFixed(0)}x${(def.h * SCALE.BUILD_CELL_SIZE).toFixed(0)} px)`);
+    console.log(`Placement: ${def.label} (${def.w}x${def.h}) Cost: ${this.formatCost(def.cost || {})}`);
   }
 
   cancelBuildingPlacement() {
@@ -1173,11 +1228,17 @@ class GameScene extends Phaser.Scene {
     this.placementGraphics.clear();
     if (!this.placementMode) return;
 
+    const landValid = this.isBuildable(this.ghostBuildX, this.ghostBuildY, this.placementMode.w, this.placementMode.h);
+    const canAfford = this.canAffordCost(this.placementMode.cost || {});
+
+    let color = 0x00ff00;
+    if (!landValid) color = 0xff0000;
+    else if (!canAfford) color = 0xffaa00;
+
     const px = this.ghostBuildX * SCALE.BUILD_CELL_SIZE;
     const py = this.ghostBuildY * SCALE.BUILD_CELL_SIZE;
     const pw = this.placementMode.w * SCALE.BUILD_CELL_SIZE;
     const ph = this.placementMode.h * SCALE.BUILD_CELL_SIZE;
-    const color = this.ghostValid ? 0x00ff00 : 0xff0000;
 
     this.placementGraphics.lineStyle(1, 0xffffff, 0.3);
     this.placementGraphics.strokeRect(px, py, pw, ph);
@@ -1243,7 +1304,9 @@ class GameScene extends Phaser.Scene {
     this.updateResourceHud();
 
     if (this.placementMode) {
-      this.ghostValid = this.isBuildable(this.ghostBuildX, this.ghostBuildY, this.placementMode.w, this.placementMode.h);
+      const landValid = this.isBuildable(this.ghostBuildX, this.ghostBuildY, this.placementMode.w, this.placementMode.h);
+      const canAfford = this.canAffordCost(this.placementMode.cost || {});
+      this.ghostValid = landValid && canAfford;
       this.renderBuildingGhost();
     }
 
@@ -1283,7 +1346,7 @@ class GameScene extends Phaser.Scene {
     let placementInfo = '';
     if (this.placementMode) {
       const def = this.placementMode;
-      placementInfo = `\nPlace: ${def.label} (${def.w}x${def.h}) at cell (${this.ghostBuildX}, ${this.ghostBuildY}) ${this.ghostValid ? 'VALID' : 'BLOCKED'}`;
+      placementInfo = `\nPlace: ${def.label} (${def.w}x${def.h}) Cost: ${this.formatCost(def.cost || {})} at cell (${this.ghostBuildX}, ${this.ghostBuildY}) ${this.ghostValid ? 'VALID' : 'BLOCKED'}`;
     }
 
     const trees = this.resourceEntities.filter(e => e.type === 'tree').length;
