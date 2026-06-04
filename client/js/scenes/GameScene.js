@@ -506,14 +506,44 @@ class GameScene extends Phaser.Scene {
     }
   }
 
+  unblockBuildCellsForEntity(entityId) {
+    for (let y = 0; y < this.buildGridHeight; y++) {
+      for (let x = 0; x < this.buildGridWidth; x++) {
+        const cell = this.buildGrid[y][x];
+
+        if (cell.blockedBy === entityId) {
+          cell.blockedBy = null;
+
+          if (!cell.occupiedBy) {
+            cell.buildable = true;
+            cell.pathable = true;
+          }
+        }
+      }
+    }
+  }
+
   removeResourceEntity(id) {
     const index = this.resourceEntities.findIndex(e => e.id === id);
     if (index === -1) return;
 
     this.resourceEntities.splice(index, 1);
+
+    this.unblockBuildCellsForEntity(id);
+
     this.renderEntities();
 
-    console.log(`Resource depleted: ${id}`);
+    if (this.placementMode) {
+      this.ghostValid = this.isBuildable(
+        this.ghostBuildX,
+        this.ghostBuildY,
+        this.placementMode.w,
+        this.placementMode.h
+      );
+      this.renderBuildingGhost();
+    }
+
+    console.log(`Resource depleted and build cells freed: ${id}`);
   }
 
   create() {
