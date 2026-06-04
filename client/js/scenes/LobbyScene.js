@@ -125,6 +125,8 @@ class LobbyScene extends Phaser.Scene {
         width: data.width,
         height: data.height,
         tiles: data.tiles,
+        resourceSites: data.resourceSites,
+        resourceEntities: data.resourceEntities,
         spawns: data.spawns,
         stats: data.stats,
       });

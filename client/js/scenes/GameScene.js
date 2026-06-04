@@ -18,6 +18,13 @@ class GameScene extends Phaser.Scene {
     this.spawns = data.spawns || [];
     this.stats = data.stats || {};
 
+    if (!Array.isArray(data.resourceEntities)) {
+      console.error('resourceEntities was missing or not an array:', data.resourceEntities);
+    }
+    if (!Array.isArray(data.resourceSites)) {
+      console.error('resourceSites was missing or not an array:', data.resourceSites);
+    }
+
     console.log('MAP DATA RECEIVED:', {
       seed: this.seed,
       size: `${this.width}x${this.height}`,

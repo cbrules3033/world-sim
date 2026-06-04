@@ -30,6 +30,16 @@ class Network {
     this.ws.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
+        if (data.type === 'map_data') {
+          console.log('CLIENT RAW MAP_DATA MESSAGE:', {
+            keys: Object.keys(data),
+            sites: data.resourceSites?.length,
+            entities: data.resourceEntities?.length,
+            firstEntity: data.resourceEntities?.[0],
+            stats: data.stats,
+            rawLength: event.data.length,
+          });
+        }
         this.emit(data.type, data);
       } catch (e) {
         console.error('Invalid message:', event.data);

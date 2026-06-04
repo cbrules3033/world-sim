@@ -165,7 +165,34 @@ function handleStartGame(ws, payload, playerIdMap) {
       return;
     }
 
+    console.log('SERVER MAP GENERATED:', {
+      seed: mapData.seed,
+      sites: mapData.resourceSites?.length,
+      entities: mapData.resourceEntities?.length,
+      firstSite: mapData.resourceSites?.[0],
+      firstEntity: mapData.resourceEntities?.[0],
+      stats: mapData.stats,
+    });
+
     for (const [pid, player] of room.players) {
+      console.log('SERVER SENDING MAP_DATA:', {
+        playerId: pid,
+        sites: mapData.resourceSites?.length,
+        entities: mapData.resourceEntities?.length,
+        firstEntity: mapData.resourceEntities?.[0],
+        approxPayloadSize: JSON.stringify({
+          seed: mapData.seed,
+          width: mapData.width,
+          height: mapData.height,
+          tiles: serializeTiles(mapData.tiles),
+          resourceSites: mapData.resourceSites,
+          resourceEntities: mapData.resourceEntities,
+          spawns: mapData.spawns,
+          stats: mapData.stats,
+          playerId: pid,
+        }).length,
+      });
+
       sendMessage(player.ws, MessageType.MAP_DATA, {
         seed: mapData.seed,
         width: mapData.width,
