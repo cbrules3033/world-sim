@@ -19,8 +19,8 @@ const MIME_TYPES = {
 };
 
 const server = http.createServer((req, res) => {
-  let filePath = req.url === '/' ? '/index.html' : req.url;
-  filePath = path.join(CLIENT_DIR, filePath);
+  let urlPath = req.url === '/' ? '/index.html' : req.url.split('?')[0];
+  const filePath = path.join(CLIENT_DIR, urlPath);
 
   const ext = path.extname(filePath);
   const contentType = MIME_TYPES[ext] || 'application/octet-stream';
@@ -31,7 +31,10 @@ const server = http.createServer((req, res) => {
       res.end('404 Not Found');
       return;
     }
-    res.writeHead(200, { 'Content-Type': contentType });
+    res.writeHead(200, {
+      'Content-Type': contentType,
+      'Cache-Control': 'no-cache, no-store, must-revalidate',
+    });
     res.end(data);
   });
 });
