@@ -8,6 +8,15 @@
 </head>
 <body>
   <div id="game-container"></div>
+  <div id="error-overlay" style="display:none;position:fixed;bottom:0;left:0;right:0;background:#a00;color:#fff;padding:12px;font:14px monospace;z-index:9999;max-height:200px;overflow:auto;"></div>
+  <script>
+    window.onerror = function(msg, url, line, col, err) {
+      var el = document.getElementById('error-overlay');
+      el.style.display = 'block';
+      el.innerHTML += '<div>' + msg + ' (line ' + line + ')</div>';
+      return false;
+    };
+  </script>
   <script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
   <script src="js/constants.js"></script>
   <script src="js/network.js"></script>

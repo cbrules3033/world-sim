@@ -29,7 +29,7 @@ export function handleMessage(ws, message, playerIdMap) {
       handleLeaveRoom(ws, playerIdMap);
       break;
     case MessageType.START_GAME:
-      handleStartGame(ws, playerIdMap);
+      handleStartGame(ws, payload, playerIdMap);
       break;
     case MessageType.PING:
       sendMessage(ws, MessageType.PONG);
@@ -130,9 +130,12 @@ function handleLeaveRoom(ws, playerIdMap) {
   handleDisconnect(ws, playerIdMap);
 }
 
-function handleStartGame(ws, playerIdMap) {
+function handleStartGame(ws, payload, playerIdMap) {
   const playerId = playerIdMap.get(ws);
-  if (!playerId) return;
+  if (!playerId) {
+    console.log('start_game: no playerId for ws');
+    return;
+  }
 
   for (const [code, room] of rooms) {
     if (!room.players.has(playerId)) continue;
@@ -141,9 +144,11 @@ function handleStartGame(ws, playerIdMap) {
       return;
     }
 
-    const seed = room.seed || `seed-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const seed = payload.seed || room.seed || `seed-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     room.seed = seed;
     room.state = 'playing';
+
+    console.log(`Starting game in room ${code}, seed: ${seed}, players: ${room.players.size}`);
 
     broadcast(room.players, MessageType.GAME_STARTING, {
       seed,
@@ -151,7 +156,14 @@ function handleStartGame(ws, playerIdMap) {
       height: room.mapSize.height,
     });
 
-    const mapData = generateMap(seed, room.mapSize.width, room.mapSize.height);
+    let mapData;
+    try {
+      mapData = generateMap(seed, room.mapSize.width, room.mapSize.height);
+    } catch (err) {
+      console.error('Map generation error:', err);
+      sendMessage(ws, MessageType.ROOM_ERROR, { error: 'Failed to generate map' });
+      return;
+    }
 
     for (const [pid, player] of room.players) {
       sendMessage(player.ws, MessageType.MAP_DATA, {

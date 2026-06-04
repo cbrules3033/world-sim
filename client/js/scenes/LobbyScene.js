@@ -1,6 +1,7 @@
 class LobbyScene extends Phaser.Scene {
   constructor() {
     super('LobbyScene');
+    this.cleanups = [];
   }
 
   init(data) {
@@ -17,7 +18,7 @@ class LobbyScene extends Phaser.Scene {
 
     this.add.text(cx, 50, 'LOBBY', { fontSize: '36px', color: '#4fc3f7', fontFamily: 'monospace' }).setOrigin(0.5);
     this.add.text(cx, 90, `Room: ${this.roomCode}`, { fontSize: '18px', color: '#ffd54f', fontFamily: 'monospace' }).setOrigin(0.5);
-    this.add.text(cx, 115, `Share this code with friends`, { fontSize: '12px', color: '#888', fontFamily: 'monospace' }).setOrigin(0.5);
+    this.add.text(cx, 115, 'Share this code with friends', { fontSize: '12px', color: '#888', fontFamily: 'monospace' }).setOrigin(0.5);
 
     this.playersText = this.add.text(cx, 170, '', { fontSize: '16px', color: '#ccc', fontFamily: 'monospace', lineSpacing: 8 }).setOrigin(0.5);
 
@@ -37,21 +38,28 @@ class LobbyScene extends Phaser.Scene {
       fontSize: '14px', color: '#888', fontFamily: 'monospace'
     }).setOrigin(0.5);
 
+    this.connText = this.add.text(cx, 510, '', {
+      fontSize: '12px', color: '#666', fontFamily: 'monospace'
+    }).setOrigin(0.5);
+
     this.updatePlayers();
 
-    this.cleanup = [
+    this.cleanups = [
       network.on('player_joined', (data) => { this.players = data.players; this.updatePlayers(); }),
       network.on('player_left', (data) => { this.players = data.players; this.updatePlayers(); }),
       network.on('lobby_update', (data) => {
         this.hostId = data.hostId;
         this.players = data.players;
-        this.startBtn.visible = this.playerId === this.hostId;
+        if (this.startBtn) this.startBtn.visible = this.playerId === this.hostId;
         this.updatePlayers();
       }),
       network.on('game_starting', (data) => this.onGameStarting(data)),
       network.on('map_data', (data) => this.onMapData(data)),
-      network.on('room_error', (data) => this.statusText.setText(data.error)),
+      network.on('room_error', (data) => { if (this.statusText) this.statusText.setText(data.error); }),
+      network.on('disconnected', () => { if (this.connText) this.connText.setText('Disconnected! Refresh page.'); }),
     ];
+
+    this.events.on('shutdown', () => this.cleanups.forEach(fn => fn()));
   }
 
   createInput(x, y, maxLength, onChange) {
@@ -94,26 +102,35 @@ class LobbyScene extends Phaser.Scene {
       const isHost = p.id === this.hostId;
       const isMe = p.id === this.playerId;
       const suffix = isHost ? ' (host)' : '';
-      const marker = isMe ? '→ ' : '  ';
+      const marker = isMe ? '\u2192 ' : '  ';
       list += `${marker}${p.name}${suffix}\n`;
     });
-    this.playersText.setText(list);
+    if (this.playersText) this.playersText.setText(list);
   }
 
   startGame() {
     network.send('start_game', { seed: this.seed || undefined });
-    this.statusText.setText('Generating map...');
+    if (this.statusText) this.statusText.setText('Generating map...');
   }
 
   onGameStarting(data) {
-    this.statusText.setText(`Map seed: ${data.seed} (${data.width}x${data.height})`);
+    if (this.statusText) this.statusText.setText(`Map seed: ${data.seed} (${data.width}x${data.height})`);
   }
 
   onMapData(data) {
-    this.scene.start('GameScene', data);
-  }
-
-  shutdown() {
-    if (this.cleanup) this.cleanup.forEach(fn => fn());
+    try {
+      this.scene.start('GameScene', {
+        playerId: data.playerId,
+        seed: data.seed,
+        width: data.width,
+        height: data.height,
+        tiles: data.tiles,
+        spawns: data.spawns,
+        stats: data.stats,
+      });
+    } catch (e) {
+      console.error('Failed to start game scene:', e);
+      if (this.statusText) this.statusText.setText('Error loading map!');
+    }
   }
 }

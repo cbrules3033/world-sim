@@ -3,6 +3,7 @@ class MenuScene extends Phaser.Scene {
     super('MenuScene');
     this.playerName = '';
     this.roomCode = '';
+    this.cleanups = [];
   }
 
   create() {
@@ -21,16 +22,22 @@ class MenuScene extends Phaser.Scene {
     this.createButton(cx, 450, 'JOIN GAME', () => this.joinRoom());
 
     this.statusText = this.add.text(cx, 520, '', { fontSize: '14px', color: '#ff6b6b', fontFamily: 'monospace' }).setOrigin(0.5);
+    this.connText = this.add.text(cx, 550, '', { fontSize: '12px', color: '#666', fontFamily: 'monospace' }).setOrigin(0.5);
 
     network.connect();
 
-    this.cleanup = [
+    this.cleanups = [
       network.on('room_created', (data) => this.onRoomCreated(data)),
       network.on('joined_room', (data) => this.onJoinedRoom(data)),
       network.on('room_error', (data) => this.showError(data.error)),
-      network.on('connected', () => this.statusText.setText('Connected')),
-      network.on('disconnected', () => this.statusText.setText('Disconnected. Reconnecting...')),
+      network.on('connected', () => { this.statusText.setText('Connected'); this.connText.setText(''); }),
+      network.on('disconnected', () => { this.connText.setText('Reconnecting...'); }),
     ];
+
+    if (!network.connected) this.connText.setText('Connecting...');
+    else this.connText.setText('');
+
+    this.events.on('shutdown', () => this.cleanups.forEach(fn => fn()));
   }
 
   createInput(x, y, maxLength, onChange) {
@@ -76,7 +83,7 @@ class MenuScene extends Phaser.Scene {
 
   showError(msg) {
     this.statusText.setText(msg);
-    this.time.delayedCall(3000, () => { if (this.statusText.text === msg) this.statusText.setText(''); });
+    this.time.delayedCall(3000, () => { if (this.statusText && this.statusText.text === msg) this.statusText.setText(''); });
   }
 
   createRoom() {
@@ -96,9 +103,5 @@ class MenuScene extends Phaser.Scene {
 
   onJoinedRoom(data) {
     this.scene.start('LobbyScene', { ...data, playerName: this.playerName });
-  }
-
-  shutdown() {
-    if (this.cleanup) this.cleanup.forEach(fn => fn());
   }
 }

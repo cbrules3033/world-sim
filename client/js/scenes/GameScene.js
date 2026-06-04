@@ -4,28 +4,40 @@ class GameScene extends Phaser.Scene {
   }
 
   init(data) {
+    if (!data || !data.tiles) {
+      console.error('GameScene: no map data received', data);
+      return;
+    }
     this.playerId = data.playerId;
     this.seed = data.seed;
     this.width = data.width;
     this.height = data.height;
     this.tiles = data.tiles;
-    this.spawns = data.spawns;
-    this.stats = data.stats;
+    this.spawns = data.spawns || [];
+    this.stats = data.stats || {};
   }
 
   create() {
+    if (!this.tiles) {
+      this.add.text(this.scale.width / 2, this.scale.height / 2, 'Error: No map data', {
+        fontSize: '24px', color: '#f00', fontFamily: 'monospace'
+      }).setOrigin(0.5);
+      return;
+    }
+
     this.cameras.main.setBackgroundColor(0x111111);
-    this.cameras.main.setZoom(2);
+    this.cameras.main.setZoom(1);
 
     this.graphics = this.add.graphics();
     this.resourceGraphics = this.add.graphics();
     this.spawnGraphics = this.add.graphics();
-    this.debugGraphics = this.add.graphics();
+
+    this.add.text(10, this.scale.height - 30, 'Rendering map...', {
+      fontSize: '14px', color: '#888', fontFamily: 'monospace'
+    }).setScrollFactor(0).setDepth(100);
 
     this.renderMap();
-
     this.setupCamera();
-
     this.createUI();
 
     this.debugVisible = true;
@@ -35,6 +47,8 @@ class GameScene extends Phaser.Scene {
     this.input.keyboard.on('keydown-BACKTICK', () => this.toggleDebug());
     this.input.keyboard.on('keydown-ONE', () => { this.resourceOverlay = !this.resourceOverlay; this.renderMap(); });
     this.input.keyboard.on('keydown-TWO', () => { this.spawnOverlay = !this.spawnOverlay; this.renderSpawns(); });
+
+    console.log('GameScene loaded:', this.width + 'x' + this.height, 'tiles:', this.tiles.length, 'spawns:', this.spawns.length);
   }
 
   renderMap() {
@@ -42,33 +56,38 @@ class GameScene extends Phaser.Scene {
     g.clear();
     this.resourceGraphics.clear();
 
-    const tilesPerCall = 5000;
+    const tilesPerCall = 4000;
     let drawn = 0;
 
     const drawBatch = () => {
-      const end = Math.min(drawn + tilesPerCall, this.tiles.length);
-      for (let i = drawn; i < end; i++) {
-        const tile = this.tiles[i];
-        const x = (i % this.width) * TILE_SIZE;
-        const y = Math.floor(i / this.width) * TILE_SIZE;
+      try {
+        const end = Math.min(drawn + tilesPerCall, this.tiles.length);
+        for (let i = drawn; i < end; i++) {
+          const tile = this.tiles[i];
+          const x = (i % this.width) * TILE_SIZE;
+          const y = Math.floor(i / this.width) * TILE_SIZE;
 
-        g.fillStyle(TERRAIN_COLORS[tile.t] || 0x4a8c3f, 1);
-        g.fillRect(x, y, TILE_SIZE, TILE_SIZE);
+          const color = TERRAIN_COLORS[tile.t] || 0x4a8c3f;
+          g.fillStyle(color, 1);
+          g.fillRect(x, y, TILE_SIZE, TILE_SIZE);
 
-        if (tile.t === 1) {
-          g.lineStyle(1, 0x1a4a7a, 0.3);
-          g.strokeRect(x, y, TILE_SIZE, TILE_SIZE);
+          if (tile.t === 1) {
+            g.lineStyle(1, 0x1a4a7a, 0.3);
+            g.strokeRect(x, y, TILE_SIZE, TILE_SIZE);
+          }
+
+          if (this.resourceOverlay && tile.r) {
+            this.drawResource(tile.r, x, y);
+          }
         }
-
-        if (this.resourceOverlay && tile.r) {
-          this.drawResource(tile.r, x, y);
+        drawn = end;
+        if (drawn < this.tiles.length) {
+          this.time.delayedCall(0, drawBatch);
+        } else {
+          this.renderSpawns();
         }
-      }
-      drawn = end;
-      if (drawn < this.tiles.length) {
-        this.time.delayedCall(0, drawBatch);
-      } else {
-        this.renderSpawns();
+      } catch (e) {
+        console.error('Render error:', e);
       }
     };
 
@@ -145,7 +164,7 @@ class GameScene extends Phaser.Scene {
     this.debugPanel.add([bg, this.debugText]);
     this.debugPanel.visible = this.debugVisible;
 
-    this.instructions = this.add.text(10, this.scale.height - 80, '` : Debug  |  1 : Resources  |  2 : Spawns  |  Drag : Pan  |  Scroll : Zoom', {
+    this.add.text(10, this.scale.height - 80, '` : Debug  |  1 : Resources  |  2 : Spawns  |  Drag : Pan  |  Scroll : Zoom', {
       fontSize: '11px', color: '#555', fontFamily: 'monospace'
     }).setScrollFactor(0).setDepth(100);
   }
@@ -156,7 +175,7 @@ class GameScene extends Phaser.Scene {
   }
 
   update() {
-    if (!this.debugVisible) return;
+    if (!this.debugVisible || !this.debugText) return;
 
     const cam = this.cameras.main;
     const zoom = cam.zoom.toFixed(1);
@@ -183,15 +202,13 @@ class GameScene extends Phaser.Scene {
       `FPS: ${Math.round(this.game.loop.actualFps)}`,
       ``,
       `Stats:`,
-      `  Water: ${this.stats.water}`,
-      `  Trees: ${this.stats.tree}`,
-      `  Stone: ${this.stats.stone}`,
-      `  Iron: ${this.stats.iron}`,
-      `  Spawns: ${this.stats.validSpawns}`,
+      `  Water: ${this.stats.water || 0}`,
+      `  Trees: ${this.stats.tree || 0}`,
+      `  Stone: ${this.stats.stone || 0}`,
+      `  Iron: ${this.stats.iron || 0}`,
+      `  Spawns: ${this.stats.validSpawns || 0}`,
       ``,
       tileInfo,
     ].join('\n'));
-
-    this.debugPanel.list[1].setText(this.debugText.text);
   }
 }
