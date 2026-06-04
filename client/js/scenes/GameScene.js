@@ -149,13 +149,9 @@ class GameScene extends Phaser.Scene {
     this.input.on('pointerdown', (pointer) => this.onPointerDown(pointer));
   }
 
-  getPointerWorldPx() {
-    const cam = this.cameras.main;
-    const pointer = this.input.activePointer;
-    return {
-      x: (pointer.x / this.scale.width * cam.width + cam.scrollX),
-      y: (pointer.y / this.scale.height * cam.height + cam.scrollY),
-    };
+  getPointerWorldPx(pointer = this.input.activePointer) {
+    const worldPoint = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
+    return { x: worldPoint.x, y: worldPoint.y };
   }
 
   renderTerrain() {
@@ -287,14 +283,15 @@ class GameScene extends Phaser.Scene {
     this.selectionGraphics.clear();
 
     for (const u of this.units) {
-      this.unitGraphics.fillStyle(0xffffcc, 1);
+      const fill = u.selected ? 0xffffff : 0xffffcc;
+      this.unitGraphics.fillStyle(fill, 1);
       this.unitGraphics.fillCircle(u.x, u.y, SCALE.UNIT_RADIUS_PX);
       this.unitGraphics.lineStyle(1, 0x333333, 1);
       this.unitGraphics.strokeCircle(u.x, u.y, SCALE.UNIT_RADIUS_PX);
 
       if (u.selected) {
-        this.selectionGraphics.lineStyle(2, 0x00ff00, 1);
-        this.selectionGraphics.strokeCircle(u.x, u.y, SCALE.UNIT_SELECTION_RADIUS_PX);
+        this.selectionGraphics.lineStyle(3, 0x00ff00, 1);
+        this.selectionGraphics.strokeCircle(u.x, u.y, SCALE.UNIT_SELECTION_RADIUS_PX + 4);
       }
     }
   }
@@ -310,11 +307,9 @@ class GameScene extends Phaser.Scene {
         this.cameras.main.scrollY -= (pointer.y - pointer.prevPosition.y) / this.cameras.main.zoom;
       }
 
-      const cam = this.cameras.main;
-      const worldPxX = (pointer.x / this.scale.width * cam.width + cam.scrollX);
-      const worldPxY = (pointer.y / this.scale.height * cam.height + cam.scrollY);
-      this.ghostBuildX = Math.floor(worldPxX / SCALE.BUILD_CELL_SIZE);
-      this.ghostBuildY = Math.floor(worldPxY / SCALE.BUILD_CELL_SIZE);
+      const wp = this.getPointerWorldPx(pointer);
+      this.ghostBuildX = Math.floor(wp.x / SCALE.BUILD_CELL_SIZE);
+      this.ghostBuildY = Math.floor(wp.y / SCALE.BUILD_CELL_SIZE);
     });
 
     this.input.on('wheel', (pointer, gameObjects, deltaX, deltaY) => {
@@ -350,8 +345,8 @@ class GameScene extends Phaser.Scene {
     this.debugPanel.visible = this.debugVisible;
   }
 
-  getEntityAtPointer() {
-    const wp = this.getPointerWorldPx();
+  getEntityAtPointer(pointer = this.input.activePointer) {
+    const wp = this.getPointerWorldPx(pointer);
     let closest = null;
     let closestDist = 15;
     for (const entity of this.resourceEntities) {
@@ -368,10 +363,10 @@ class GameScene extends Phaser.Scene {
     return closest;
   }
 
-  getUnitAtPointer() {
-    const wp = this.getPointerWorldPx();
+  getUnitAtPointer(pointer = this.input.activePointer) {
+    const wp = this.getPointerWorldPx(pointer);
     let closest = null;
-    let closestDist = SCALE.UNIT_SELECTION_RADIUS_PX + 4;
+    let closestDist = SCALE.UNIT_SELECTION_RADIUS_PX + 8;
     for (const u of this.units) {
       const dx = u.x - wp.x;
       const dy = u.y - wp.y;
@@ -385,9 +380,19 @@ class GameScene extends Phaser.Scene {
   }
 
   onPointerDown(pointer) {
-    const wp = this.getPointerWorldPx();
+    const wp = this.getPointerWorldPx(pointer);
+    const isLeftClick = pointer.button === 0;
+    const isRightClick = pointer.button === 2;
 
-    if (pointer.leftButtonDown()) {
+    console.log('POINTER DOWN:', {
+      button: pointer.button,
+      worldX: wp.x.toFixed(1),
+      worldY: wp.y.toFixed(1),
+      units: this.units.length,
+      selected: this.selectedUnits.length,
+    });
+
+    if (isLeftClick) {
       if (this.placementMode) {
         if (this.ghostValid) {
           this.placeBuilding(this.placementMode.type, this.ghostBuildX, this.ghostBuildY);
@@ -398,7 +403,9 @@ class GameScene extends Phaser.Scene {
 
       this.clearUnitSelection();
 
-      const unit = this.getUnitAtPointer();
+      const unit = this.getUnitAtPointer(pointer);
+      console.log('Clicked unit:', unit);
+
       if (unit) {
         unit.selected = true;
         this.selectedUnits = [unit];
@@ -406,7 +413,7 @@ class GameScene extends Phaser.Scene {
         return;
       }
 
-      const entity = this.getEntityAtPointer();
+      const entity = this.getEntityAtPointer(pointer);
       if (entity) {
         let siteInfo = '';
         if (entity.depositId) {
@@ -417,13 +424,23 @@ class GameScene extends Phaser.Scene {
       }
 
       this.renderUnits();
-    } else if (pointer.rightButtonDown()) {
+    }
+
+    if (isRightClick) {
       if (this.selectedUnits.length > 0) {
+        console.log('Move command:', {
+          selectedUnits: this.selectedUnits.length,
+          targetX: wp.x.toFixed(1),
+          targetY: wp.y.toFixed(1),
+        });
+
         for (const unit of this.selectedUnits) {
           unit.targetX = wp.x;
           unit.targetY = wp.y;
           unit.state = 'moving';
         }
+
+        this.renderUnits();
       }
     }
   }
@@ -594,6 +611,8 @@ class GameScene extends Phaser.Scene {
   }
 
   updateUnits(delta) {
+    let anyMoved = false;
+
     for (const u of this.units) {
       if (u.state !== 'moving') continue;
 
@@ -605,12 +624,18 @@ class GameScene extends Phaser.Scene {
         u.x = u.targetX;
         u.y = u.targetY;
         u.state = 'idle';
+        anyMoved = true;
         continue;
       }
 
       const step = (u.speed * delta) / 1000;
       u.x += (dx / dist) * Math.min(step, dist);
       u.y += (dy / dist) * Math.min(step, dist);
+      anyMoved = true;
+    }
+
+    if (anyMoved) {
+      this.renderUnits();
     }
   }
 
@@ -628,14 +653,12 @@ class GameScene extends Phaser.Scene {
     const zoom = cam.zoom.toFixed(1);
     const scrollX = Math.floor(cam.scrollX);
     const scrollY = Math.floor(cam.scrollY);
-    const mouse = this.input.activePointer;
-    const worldPxX = (mouse.x / this.scale.width * cam.width + cam.scrollX);
-    const worldPxY = (mouse.y / this.scale.height * cam.height + cam.scrollY);
+    const wp = this.getPointerWorldPx();
 
-    const tileX = Math.floor(worldPxX / SCALE.TERRAIN_TILE_SIZE);
-    const tileY = Math.floor(worldPxY / SCALE.TERRAIN_TILE_SIZE);
-    const buildX = Math.floor(worldPxX / SCALE.BUILD_CELL_SIZE);
-    const buildY = Math.floor(worldPxY / SCALE.BUILD_CELL_SIZE);
+    const tileX = Math.floor(wp.x / SCALE.TERRAIN_TILE_SIZE);
+    const tileY = Math.floor(wp.y / SCALE.TERRAIN_TILE_SIZE);
+    const buildX = Math.floor(wp.x / SCALE.BUILD_CELL_SIZE);
+    const buildY = Math.floor(wp.y / SCALE.BUILD_CELL_SIZE);
 
     const idx = tileY * this.width + tileX;
     let tileInfo = '';
