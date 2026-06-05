@@ -64,21 +64,46 @@ class ResourceSystem {
     };
   }
 
-  getGatherPointNearEntity(entity, unit) {
-    const ex = entity.position.x * SCALE.TERRAIN_TILE_SIZE;
-    const ey = entity.position.y * SCALE.TERRAIN_TILE_SIZE;
+  hashUnitIdToAngle(unitId) {
+    let hash = 0;
+    for (let i = 0; i < unitId.length; i++) {
+      hash = ((hash << 5) - hash) + unitId.charCodeAt(i);
+      hash |= 0;
+    }
+    const normalized = Math.abs(hash % 360);
+    return (normalized / 360) * Math.PI * 2;
+  }
 
-    const dx = unit.x - ex;
-    const dy = unit.y - ey;
-    const d = Math.sqrt(dx * dx + dy * dy) || 1;
+  getGatherPointNearEntity(entity, unit = null) {
+    const px = entity.position.x * SCALE.TERRAIN_TILE_SIZE;
+    const py = entity.position.y * SCALE.TERRAIN_TILE_SIZE;
 
-    const collisionRadius = entity.collisionRadiusPx || 8;
-    const standDistance = collisionRadius + SCALE.UNIT_RADIUS_PX + 4;
+    const radius = Math.max(
+      entity.collisionRadiusPx || 10,
+      (entity.radius || 0.5) * SCALE.TERRAIN_TILE_SIZE
+    );
 
-    return {
-      x: ex + (dx / d) * standDistance,
-      y: ey + (dy / d) * standDistance,
-    };
+    const standDistance = radius + UNIT_COLLISION.SEPARATION_RADIUS;
+
+    const baseAngle = unit
+      ? this.hashUnitIdToAngle(unit.id)
+      : 0;
+
+    const attempts = 12;
+
+    for (let i = 0; i < attempts; i++) {
+      const angle = baseAngle + i * ((Math.PI * 2) / attempts);
+      const x = px + Math.cos(angle) * standDistance;
+      const y = py + Math.sin(angle) * standDistance;
+
+      const cell = this.scene.worldPxToBuildCell(x, y);
+
+      if (this.scene.isCellPathable(cell.x, cell.y)) {
+        return this.scene.buildCellToWorldPx(cell.x, cell.y);
+      }
+    }
+
+    return { x: px, y: py };
   }
 
   getCarryColor(resourceType) {
@@ -174,9 +199,10 @@ class ResourceSystem {
     unit.carryCapacity = rules.carryCapacity;
     unit.workState = 'moving_to_resource';
     unit.gatherTimer = 0;
+    unit.jobRetryTimer = 0;
 
     const point = this.getGatherPointNearEntity(entity, unit);
-    this.scene.commandMoveUnit(unit, point.x, point.y);
+    this.scene.commandMoveUnit(unit, point.x, point.y, { stopOnFail: false });
 
     if (this.scene.verboseLogs) console.log(`${unit.id} assigned to ${rules.actionName} ${entity.resourceType} from ${entity.id}`);
   }
@@ -219,9 +245,10 @@ class ResourceSystem {
 
     unit.dropoffTargetId = dropoff.id;
     unit.workState = 'moving_to_dropoff';
+    unit.jobRetryTimer = 0;
 
     const point = this.getDropoffPointNearBuilding(dropoff, unit);
-    this.scene.commandMoveUnit(unit, point.x, point.y);
+    this.scene.commandMoveUnit(unit, point.x, point.y, { stopOnFail: false });
 
     return true;
   }
@@ -303,8 +330,25 @@ class ResourceSystem {
     if (unit.type !== 'villager') return;
 
     if (unit.workState === 'moving_to_resource' && unit.state === 'idle') {
+      unit.jobRetryTimer = (unit.jobRetryTimer || 0) + delta;
+
+      if (unit.jobRetryTimer > 800) {
+        unit.jobRetryTimer = 0;
+
+        const entity = this.getResourceEntityById(unit.gatherTargetId);
+        if (entity && entity.amount > 0) {
+          const gatherPoint = this.getGatherPointNearEntity(entity, unit);
+          this.scene.commandMoveUnit(unit, gatherPoint.x, gatherPoint.y, { stopOnFail: false });
+        }
+      }
+    } else if (unit.workState === 'moving_to_resource' && unit.state !== 'idle') {
+      unit.jobRetryTimer = 0;
+    }
+
+    if (unit.workState === 'moving_to_resource' && unit.state === 'idle') {
       unit.workState = 'gathering';
       unit.gatherTimer = 0;
+      unit.jobRetryTimer = 0;
     }
 
     if (unit.workState === 'gathering') {

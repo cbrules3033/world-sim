@@ -265,6 +265,7 @@ class BuildingSystem {
         gatherTimer: 0,
         buildTargetId: null,
         buildTimer: 0,
+        jobRetryTimer: 0,
       });
     }
 
@@ -361,9 +362,10 @@ class BuildingSystem {
       gatherResourceType: null,
       dropoffTargetId: null,
       gatherTimer: 0,
-      buildTargetId: null,
-      buildTimer: 0,
-    };
+        buildTargetId: null,
+        buildTimer: 0,
+        jobRetryTimer: 0,
+      };
 
     scene.units.push(villager);
     scene.refreshPopulationUsed();
@@ -392,7 +394,24 @@ class BuildingSystem {
     };
   }
 
-  getBuildPointNearBuilding(building) {
+  isCandidateCrowded(x, y, ignoreUnitId = null) {
+    const scene = this.scene;
+
+    for (const unit of scene.units) {
+      if (unit.id === ignoreUnitId) continue;
+
+      const dx = unit.x - x;
+      const dy = unit.y - y;
+
+      if (dx * dx + dy * dy < UNIT_COLLISION.SEPARATION_RADIUS * UNIT_COLLISION.SEPARATION_RADIUS) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  getBuildPointNearBuilding(building, unit = null) {
     const scene = this.scene;
 
     const minX = building.buildX;
@@ -412,17 +431,24 @@ class BuildingSystem {
       candidates.push({ x: maxX + 1, y });
     }
 
-    const unit = scene.selectedUnits?.[0];
+    const refX = unit ? unit.x : building.worldX;
+    const refY = unit ? unit.y : building.worldY;
     let best = null;
     let bestDist = Infinity;
 
     for (const c of candidates) {
       if (!scene.isCellPathable(c.x, c.y)) continue;
 
+      if (unit && this.isCandidateCrowded(
+        c.x * SCALE.BUILD_CELL_SIZE + SCALE.BUILD_CELL_SIZE / 2,
+        c.y * SCALE.BUILD_CELL_SIZE + SCALE.BUILD_CELL_SIZE / 2,
+        unit.id
+      )) {
+        continue;
+      }
+
       const wp = scene.buildCellToWorldPx(c.x, c.y);
 
-      const refX = unit ? unit.x : building.worldX;
-      const refY = unit ? unit.y : building.worldY;
       const dx = wp.x - refX;
       const dy = wp.y - refY;
       const d = dx * dx + dy * dy;
@@ -455,15 +481,16 @@ class BuildingSystem {
     unit.workState = 'moving_to_build';
     unit.buildTargetId = building.id;
     unit.buildTimer = 0;
+    unit.jobRetryTimer = 0;
 
-    const buildPoint = this.getBuildPointNearBuilding(building);
+    const buildPoint = this.getBuildPointNearBuilding(building, unit);
 
     if (!buildPoint) {
       scene.addGameMessage('No build position available', UI_STYLE.textWarn);
       return false;
     }
 
-    scene.commandMoveUnit(unit, buildPoint.x, buildPoint.y);
+    scene.commandMoveUnit(unit, buildPoint.x, buildPoint.y, { stopOnFail: false });
 
     return true;
   }
@@ -618,12 +645,28 @@ class BuildingSystem {
     ) * SCALE.BUILD_CELL_SIZE / 2 + 14;
 
     if (unit.workState === 'moving_to_build') {
-      if (dist <= buildRange || unit.state === 'idle') {
+      if (dist <= buildRange) {
         unit.state = 'idle';
         unit.path = [];
         unit.pathIndex = 0;
         unit.workState = 'building';
         unit.buildTimer = 0;
+        unit.jobRetryTimer = 0;
+      } else if (unit.state === 'idle') {
+        unit.jobRetryTimer = (unit.jobRetryTimer || 0) + delta;
+
+        if (unit.jobRetryTimer > 800) {
+          unit.jobRetryTimer = 0;
+
+          if (building && !building.constructed) {
+            const buildPoint = this.getBuildPointNearBuilding(building, unit);
+            if (buildPoint) {
+              scene.commandMoveUnit(unit, buildPoint.x, buildPoint.y, { stopOnFail: false });
+            }
+          }
+        }
+      } else {
+        unit.jobRetryTimer = 0;
       }
     }
   }

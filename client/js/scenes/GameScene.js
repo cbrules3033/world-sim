@@ -146,8 +146,8 @@ class GameScene extends Phaser.Scene {
     return this.pathfindingSystem.findNearestPathableCell(cx, cy, maxRadius);
   }
 
-  commandMoveUnit(unit, targetWorldX, targetWorldY) {
-    return this.pathfindingSystem.commandMoveUnit(unit, targetWorldX, targetWorldY);
+  commandMoveUnit(unit, targetWorldX, targetWorldY, options = {}) {
+    return this.pathfindingSystem.commandMoveUnit(unit, targetWorldX, targetWorldY, options);
   }
 
   commandMoveSelectedUnits(targetX, targetY) {

@@ -148,9 +148,10 @@ class PathfindingSystem {
     return null;
   }
 
-  commandMoveUnit(unit, targetWorldX, targetWorldY) {
+  commandMoveUnit(unit, targetWorldX, targetWorldY, options = {}) {
     const start = this.worldPxToBuildCell(unit.x, unit.y);
     const goal = this.worldPxToBuildCell(targetWorldX, targetWorldY);
+    const stopOnFail = options.stopOnFail !== false;
 
     let finalGoal = goal;
 
@@ -158,7 +159,7 @@ class PathfindingSystem {
       finalGoal = this.findNearestPathableCell(goal.x, goal.y, 12);
       if (!finalGoal) {
         console.warn('No pathable target near clicked location');
-        this.scene.unitSystem?.stopUnit(unit);
+        if (stopOnFail) this.scene.unitSystem?.stopUnit(unit);
         return false;
       }
     }
@@ -167,7 +168,7 @@ class PathfindingSystem {
 
     if (!path || path.length === 0) {
       console.warn('No path found', { start, finalGoal });
-      this.scene.unitSystem?.stopUnit(unit);
+      if (stopOnFail) this.scene.unitSystem?.stopUnit(unit);
       return false;
     }
 

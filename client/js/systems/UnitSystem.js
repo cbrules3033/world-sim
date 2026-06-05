@@ -111,21 +111,78 @@ class UnitSystem {
     };
   }
 
+  getSeparationWeight(unit) {
+    if (!unit.workState || unit.workState === 'idle') return 1.0;
+
+    if (
+      unit.workState === 'moving_to_resource' ||
+      unit.workState === 'moving_to_dropoff' ||
+      unit.workState === 'moving_to_build'
+    ) {
+      return 0.65;
+    }
+
+    if (
+      unit.workState === 'gathering' ||
+      unit.workState === 'building'
+    ) {
+      return 0.35;
+    }
+
+    return 1.0;
+  }
+
+  getUnitWorkAnchor(unit) {
+    const scene = this.scene;
+
+    if (
+      unit.gatherTargetId &&
+      (unit.workState === 'gathering' || unit.workState === 'moving_to_resource')
+    ) {
+      const entity = scene.getResourceEntityById(unit.gatherTargetId);
+      if (entity) {
+        return {
+          x: entity.position.x * SCALE.TERRAIN_TILE_SIZE,
+          y: entity.position.y * SCALE.TERRAIN_TILE_SIZE,
+          maxDistance: 34,
+        };
+      }
+    }
+
+    if (
+      unit.dropoffTargetId &&
+      unit.workState === 'moving_to_dropoff'
+    ) {
+      const building = scene.getBuildingById(unit.dropoffTargetId);
+      if (building) {
+        return {
+          x: building.worldX + (building.footprintW * SCALE.BUILD_CELL_SIZE) / 2,
+          y: building.worldY + (building.footprintH * SCALE.BUILD_CELL_SIZE) / 2,
+          maxDistance: Math.max(building.footprintW, building.footprintH) * SCALE.BUILD_CELL_SIZE / 2 + 28,
+        };
+      }
+    }
+
+    if (
+      unit.buildTargetId &&
+      (unit.workState === 'building' || unit.workState === 'moving_to_build')
+    ) {
+      const building = scene.getBuildingById(unit.buildTargetId);
+      if (building) {
+        return {
+          x: building.worldX + (building.footprintW * SCALE.BUILD_CELL_SIZE) / 2,
+          y: building.worldY + (building.footprintH * SCALE.BUILD_CELL_SIZE) / 2,
+          maxDistance: Math.max(building.footprintW, building.footprintH) * SCALE.BUILD_CELL_SIZE / 2 + 24,
+        };
+      }
+    }
+
+    return null;
+  }
+
   applyUnitSeparation() {
     const scene = this.scene;
-    const units = scene.units.filter(u => {
-      if (u.ownerId !== scene.playerId) return false;
-      if (
-        u.workState === 'gathering' ||
-        u.workState === 'moving_to_resource' ||
-        u.workState === 'moving_to_dropoff' ||
-        u.workState === 'building' ||
-        u.workState === 'moving_to_build'
-      ) {
-        return false;
-      }
-      return true;
-    });
+    const units = scene.units.filter(u => u.ownerId === scene.playerId);
 
     const pushes = new Map();
 
@@ -194,12 +251,25 @@ class UnitSystem {
         continue;
       }
 
-      const clamped = this.clampPush(push.x, push.y);
+      const weight = this.getSeparationWeight(unit);
+      const clamped = this.clampPush(push.x * weight, push.y * weight);
 
       if (Math.abs(clamped.x) < 0.01 && Math.abs(clamped.y) < 0.01) continue;
 
       const nextX = unit.x + clamped.x;
       const nextY = unit.y + clamped.y;
+
+      const anchor = this.getUnitWorkAnchor(unit);
+
+      if (anchor) {
+        const ax = nextX - anchor.x;
+        const ay = nextY - anchor.y;
+        const dist = Math.sqrt(ax * ax + ay * ay);
+
+        if (dist > anchor.maxDistance) {
+          continue;
+        }
+      }
 
       if (this.isWorldPointPathable(nextX, nextY)) {
         unit.x = nextX;
@@ -241,6 +311,15 @@ class UnitSystem {
 
     unit.stuckTimer = 0;
     unit.lastProgressDist = Infinity;
+
+    if (unit.gatherTargetId || unit.buildTargetId || unit.dropoffTargetId) {
+      unit.state = 'idle';
+      unit.path = [];
+      unit.pathIndex = 0;
+
+      if (scene.verboseLogs) console.log('Gentle stuck recovery for job unit:', unit.id);
+      return;
+    }
 
     if (unit.path && unit.path.length > 0) {
       const final = unit.path[unit.path.length - 1];
