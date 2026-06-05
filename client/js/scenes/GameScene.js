@@ -38,6 +38,9 @@ class GameScene extends Phaser.Scene {
     this.nextBuildingId = 1;
     this.nextUnitId = 1;
 
+    this.populationCap = 0;
+    this.selectedBuilding = null;
+
     this.buildGridWidth = this.width * SCALE.BUILD_CELLS_PER_TILE;
     this.buildGridHeight = this.height * SCALE.BUILD_CELLS_PER_TILE;
     this.buildGrid = [];
@@ -696,6 +699,7 @@ class GameScene extends Phaser.Scene {
 
     this.setupCamera();
     this.createUI();
+    this.createCommandPanel();
 
     this.input.mouse.disableContextMenu();
 
@@ -923,14 +927,207 @@ class GameScene extends Phaser.Scene {
 
   updateResourceHud() {
     if (!this.resourceHudText) return;
+    this.populationUsed = this.units.filter(u => u.ownerId === this.playerId).length;
     this.resourceHudText.setText(
-      `Wood: ${this.playerResources.wood}   Stone: ${this.playerResources.stone}   Copper: ${this.playerResources.copper}   Iron: ${this.playerResources.iron}`
+      `Pop: ${this.populationUsed}/${this.populationCap}  |  Wood: ${this.playerResources.wood}  Stone: ${this.playerResources.stone}  Copper: ${this.playerResources.copper}  Iron: ${this.playerResources.iron}`
     );
   }
 
   toggleDebug() {
     this.debugVisible = !this.debugVisible;
     this.debugPanel.visible = this.debugVisible;
+  }
+
+  createCommandPanel() {
+    const panelH = 70;
+    const panelY = this.scale.height - panelH;
+
+    this.commandPanelContainer = this.add.container(0, panelY);
+    this.commandPanelContainer.setScrollFactor(0);
+    this.commandPanelContainer.setDepth(200);
+    this.commandPanelContainer.visible = false;
+
+    this.commandPanelBg = this.add.rectangle(
+      this.scale.width / 2, panelH / 2,
+      this.scale.width, panelH,
+      UI_STYLE.panelBg, UI_STYLE.panelAlpha
+    ).setOrigin(0.5, 0.5);
+
+    this.commandPanelTitle = this.add.text(12, 8, '', {
+      fontSize: '13px', color: UI_STYLE.accentColor, fontFamily: 'monospace', fontStyle: 'bold',
+    });
+
+    this.commandPanelButtons = [];
+
+    this.commandPanelContainer.add([this.commandPanelBg, this.commandPanelTitle]);
+  }
+
+  showCommandPanel(building) {
+    if (!this.commandPanelContainer) return;
+
+    for (const child of this.commandPanelButtons) {
+      child.destroy();
+    }
+    this.commandPanelButtons = [];
+
+    this.commandPanelContainer.visible = true;
+    this.commandPanelTitle.setText(BUILDING_DEFS[building.type]?.label || building.type);
+
+    if (building.type === 'town_center') {
+      this.addCommandButton('Train Villager', VILLAGER_COST, () => this.trainVillager(building));
+    }
+  }
+
+  addCommandButton(label, cost, callback) {
+    const x = this.commandPanelButtons.length * 160 + 12;
+    const y = 30;
+    const w = 150;
+    const h = 30;
+
+    const canAfford = this.canAffordCost(cost);
+    const bgColor = canAfford ? UI_STYLE.buttonBg : UI_STYLE.buttonDisabled;
+    const textColor = canAfford ? UI_STYLE.textColor : UI_STYLE.disabledColor;
+
+    const costStr = Object.entries(cost).map(([r, a]) => `${a}${r[0]}`).join(' ');
+
+    const bg = this.add.rectangle(x, y, w, h, bgColor, 1).setOrigin(0, 0);
+    bg.setInteractive({ useHandCursor: canAfford });
+
+    if (canAfford) {
+      bg.on('pointerover', () => bg.setFillStyle(UI_STYLE.buttonHover));
+      bg.on('pointerout', () => bg.setFillStyle(UI_STYLE.buttonBg));
+      bg.on('pointerdown', callback);
+    }
+
+    const txt = this.add.text(x + 4, y + 2, label, {
+      fontSize: '11px', color: textColor, fontFamily: 'monospace',
+    });
+    const costTxt = this.add.text(x + 4, y + 15, costStr, {
+      fontSize: '9px', color: canAfford ? '#aaa' : UI_STYLE.disabledColor, fontFamily: 'monospace',
+    });
+
+    this.commandPanelButtons.push(bg, txt, costTxt);
+    this.commandPanelContainer.add([bg, txt, costTxt]);
+  }
+
+  hideCommandPanel() {
+    if (!this.commandPanelContainer) return;
+    this.commandPanelContainer.visible = false;
+    for (const child of this.commandPanelButtons) {
+      child.destroy();
+    }
+    this.commandPanelButtons = [];
+  }
+
+  getBuildingAtPointer(pointer) {
+    const wp = this.getPointerWorldPx(pointer);
+    let closest = null;
+    let closestDist = 30;
+    for (const b of this.buildings) {
+      if (b.ownerId !== this.playerId) continue;
+      const cx = b.worldX + (b.footprintW * SCALE.BUILD_CELL_SIZE) / 2;
+      const cy = b.worldY + (b.footprintH * SCALE.BUILD_CELL_SIZE) / 2;
+      const hw = (b.footprintW * SCALE.BUILD_CELL_SIZE) / 2;
+      const hh = (b.footprintH * SCALE.BUILD_CELL_SIZE) / 2;
+      const dx = Math.abs(wp.x - cx);
+      const dy = Math.abs(wp.y - cy);
+      if (dx <= hw && dy <= hh) {
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < closestDist) {
+          closest = b;
+          closestDist = dist;
+        }
+      }
+    }
+    return closest;
+  }
+
+  selectBuilding(building) {
+    this.selectedBuilding = building;
+    this.showCommandPanel(building);
+    console.log('Building selected:', building.type, building.id);
+  }
+
+  deselectBuilding() {
+    this.selectedBuilding = null;
+    this.hideCommandPanel();
+  }
+
+  trainVillager(building) {
+    if (!building) return;
+
+    if (this.populationUsed >= this.populationCap) {
+      this.showFloatingMessage('Population cap reached!');
+      return;
+    }
+
+    if (!this.spendCost(VILLAGER_COST)) {
+      this.showFloatingMessage(`Need: ${this.formatCost(VILLAGER_COST)}`);
+      return;
+    }
+
+    const cx = building.buildX + building.footprintW / 2;
+    const cy = building.buildY + building.footprintH / 2;
+    const spawnDist = Math.max(building.footprintW, building.footprintH) / 2 + 2;
+    let px, py;
+
+    const directions = [
+      { x: cx, y: cy + spawnDist },
+      { x: cx, y: cy - spawnDist },
+      { x: cx + spawnDist, y: cy },
+      { x: cx - spawnDist, y: cy },
+    ];
+
+    let found = false;
+    for (const dir of directions) {
+      const bgx = Math.floor(dir.x);
+      const bgy = Math.floor(dir.y);
+      if (bgx >= 0 && bgx < this.buildGridWidth && bgy >= 0 && bgy < this.buildGridHeight && this.buildGrid[bgy][bgx].pathable) {
+        px = bgx * SCALE.BUILD_CELL_SIZE + SCALE.BUILD_CELL_SIZE / 2;
+        py = bgy * SCALE.BUILD_CELL_SIZE + SCALE.BUILD_CELL_SIZE / 2;
+        found = true;
+        break;
+      }
+    }
+
+    if (!found) {
+      px = cx * SCALE.BUILD_CELL_SIZE;
+      py = (cy + spawnDist) * SCALE.BUILD_CELL_SIZE;
+    }
+
+    const villager = {
+      id: `unit_${this.nextUnitId++}`,
+      ownerId: this.playerId,
+      type: 'villager',
+      x: px, y: py,
+      targetX: px, targetY: py,
+      speed: 80,
+      selected: false,
+      state: 'idle',
+      path: [],
+      pathIndex: 0,
+      carryResource: null,
+      carryAmount: 0,
+      carryCapacity: 10,
+      workState: 'idle',
+      gatherTargetId: null,
+      gatherResourceType: null,
+      dropoffTargetId: null,
+      gatherTimer: 0,
+    };
+
+    this.units.push(villager);
+    this.renderUnits();
+    this.showFloatingMessage('Villager trained!', 20, 90, '#00ff00');
+    console.log('Villager trained at:', building.id, { x: px, y: py });
+  }
+
+  isPointerOverUI(pointer) {
+    if (this.commandPanelContainer && this.commandPanelContainer.visible) {
+      const panelY = this.scale.height - 70;
+      if (pointer.y >= panelY) return true;
+    }
+    return false;
   }
 
   getEntityAtPointer(pointer = this.input.activePointer) {
@@ -981,6 +1178,8 @@ class GameScene extends Phaser.Scene {
     });
 
     if (isLeftClick) {
+      if (this.isPointerOverUI(pointer)) return;
+
       if (this.placementMode) {
         if (!this.ghostValid) {
           console.log('Cannot place building:', {
@@ -1005,6 +1204,7 @@ class GameScene extends Phaser.Scene {
       }
 
       this.clearUnitSelection();
+      this.deselectBuilding();
 
       const unit = this.getUnitAtPointer(pointer);
       console.log('Clicked unit:', unit);
@@ -1013,6 +1213,12 @@ class GameScene extends Phaser.Scene {
         unit.selected = true;
         this.selectedUnits = [unit];
         this.renderUnits();
+        return;
+      }
+
+      const building = this.getBuildingAtPointer(pointer);
+      if (building) {
+        this.selectBuilding(building);
         return;
       }
 
@@ -1104,7 +1310,11 @@ class GameScene extends Phaser.Scene {
     this.renderBuildings();
 
     if (type === 'town_center') {
+      this.populationCap += POPULATION.BASE_CAP;
       this.spawnStartingVillagers(building);
+    }
+    if (type === 'house') {
+      this.populationCap += POPULATION.PER_HOUSE;
     }
 
     console.log(`BUILD PLACED: ${type} at build (${buildX}, ${buildY}) px (${building.worldX}, ${building.worldY})`);

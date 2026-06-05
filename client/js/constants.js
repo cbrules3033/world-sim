@@ -67,3 +67,23 @@ const RESOURCE_GATHER_RULES = {
     actionName: 'mining',
   },
 };
+
+const POPULATION = {
+  BASE_CAP: 5,
+  PER_HOUSE: 5,
+};
+
+const VILLAGER_COST = {
+  wood: 50,
+};
+
+const UI_STYLE = {
+  panelBg: 0x000000,
+  panelAlpha: 0.75,
+  textColor: '#ffffff',
+  disabledColor: '#666666',
+  buttonBg: 0x3a3a3a,
+  buttonHover: 0x5a5a5a,
+  buttonDisabled: 0x222222,
+  accentColor: '#ffcc00',
+};
