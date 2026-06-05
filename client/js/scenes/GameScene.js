@@ -92,28 +92,7 @@ class GameScene extends Phaser.Scene {
   }
 
   blockBuildCellsForEntity(entity) {
-    const px = entity.position.x * SCALE.TERRAIN_TILE_SIZE;
-    const py = entity.position.y * SCALE.TERRAIN_TILE_SIZE;
-    const radius = entity.collisionRadiusPx || 6;
-
-    const minBX = Math.max(0, Math.floor((px - radius) / SCALE.BUILD_CELL_SIZE));
-    const maxBX = Math.min(this.buildGridWidth - 1, Math.floor((px + radius) / SCALE.BUILD_CELL_SIZE));
-    const minBY = Math.max(0, Math.floor((py - radius) / SCALE.BUILD_CELL_SIZE));
-    const maxBY = Math.min(this.buildGridHeight - 1, Math.floor((py + radius) / SCALE.BUILD_CELL_SIZE));
-
-    for (let gy = minBY; gy <= maxBY; gy++) {
-      for (let gx = minBX; gx <= maxBX; gx++) {
-        const cellCX = gx * SCALE.BUILD_CELL_SIZE + SCALE.BUILD_CELL_SIZE / 2;
-        const cellCY = gy * SCALE.BUILD_CELL_SIZE + SCALE.BUILD_CELL_SIZE / 2;
-        const dx = cellCX - px;
-        const dy = cellCY - py;
-        if (dx * dx + dy * dy <= radius * radius) {
-          this.buildGrid[gy][gx].buildable = false;
-          this.buildGrid[gy][gx].pathable = false;
-          this.buildGrid[gy][gx].blockedBy = entity.id;
-        }
-      }
-    }
+    this.buildings.blockBuildCellsForEntity(entity);
   }
 
   worldPxToBuildCell(x, y) {
@@ -188,54 +167,15 @@ class GameScene extends Phaser.Scene {
   }
 
   canAffordCost(cost = {}) {
-    for (const [resource, amount] of Object.entries(cost)) {
-      if ((this.playerResources[resource] || 0) < amount) return false;
-    }
-    return true;
+    return this.buildings.canAffordCost(cost);
   }
 
   spendCost(cost = {}) {
-    if (!this.canAffordCost(cost)) return false;
-    for (const [resource, amount] of Object.entries(cost)) {
-      this.playerResources[resource] -= amount;
-    }
-    this.updateResourceHud();
-    if (this.ui) this.ui.lastActionPanelKey = null;
-    this.ui?.updateActionPanel();
-    this.ui?.updateCommandPanel();
-    return true;
+    return this.buildings.spendCost(cost);
   }
 
   formatCost(cost = {}) {
-    const parts = [];
-    for (const [resource, amount] of Object.entries(cost)) {
-      parts.push(`${amount}${resource[0]}`);
-    }
-    return parts.length > 0 ? parts.join(' ') : 'free';
-  }
-
-  showFloatingMessage(text, x = this.scale.width / 2, y = 58, color = '#ffcc00') {
-    const msg = this.registerUIObject(this.add.text(x, y, text, {
-      fontSize: '14px',
-      color,
-      fontFamily: UI_STYLE.fontFamily,
-      backgroundColor: '#000000cc',
-      padding: { x: 10, y: 6 },
-    }));
-
-    msg.setOrigin(0.5, 0);
-    msg.setScrollFactor(0);
-    msg.setDepth(UI_DEPTH + 50);
-
-    this.syncCameraIgnores();
-
-    this.tweens.add({
-      targets: msg,
-      alpha: 0,
-      y: y - 18,
-      duration: 1300,
-      onComplete: () => msg.destroy(),
-    });
+    return this.buildings.formatCost(cost);
   }
 
   sendUnitToDropoff(unit) {
@@ -287,6 +227,7 @@ class GameScene extends Phaser.Scene {
 
     this.pathfinding = new PathfindingSystem(this);
     this.resources = new ResourceSystem(this);
+    this.buildings = new BuildingSystem(this);
     this.ui = new UISystem(this);
 
     this.worldObjects = (this.worldObjects || []).concat([
@@ -1075,117 +1016,19 @@ class GameScene extends Phaser.Scene {
   }
 
   getBuildingAtPointer(pointer) {
-    const wp = this.getPointerWorldPx(pointer);
-    let closest = null;
-    let closestDist = 30;
-    for (const b of this.buildings) {
-      if (b.ownerId !== this.playerId) continue;
-      const cx = b.worldX + (b.footprintW * SCALE.BUILD_CELL_SIZE) / 2;
-      const cy = b.worldY + (b.footprintH * SCALE.BUILD_CELL_SIZE) / 2;
-      const hw = (b.footprintW * SCALE.BUILD_CELL_SIZE) / 2;
-      const hh = (b.footprintH * SCALE.BUILD_CELL_SIZE) / 2;
-      const dx = Math.abs(wp.x - cx);
-      const dy = Math.abs(wp.y - cy);
-      if (dx <= hw && dy <= hh) {
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        if (dist < closestDist) {
-          closest = b;
-          closestDist = dist;
-        }
-      }
-    }
-    return closest;
+    return this.buildings.getBuildingAtPointer(pointer);
   }
 
   selectBuilding(building) {
-    this.selectedBuilding = building;
-    this.clearUnitSelection();
-    this.renderUnits();
-    this.renderSelectedBuilding();
-    if (this.verboseLogs) console.log('Building selected:', building.type, building.id);
+    this.buildings.selectBuilding(building);
   }
 
   deselectBuilding() {
-    this.selectedBuilding = null;
-    this.renderSelectedBuilding();
+    this.buildings.deselectBuilding();
   }
 
   trainVillager(building) {
-    if (!building) return;
-
-    if (this.populationUsed >= this.populationCap) {
-      if (this.verboseLogs) console.log('Train blocked: population cap reached');
-      this.showFloatingMessage('Population cap reached!');
-      this.addGameMessage('Population cap reached!', UI_STYLE.textWarn);
-      return;
-    }
-
-    if (!this.spendCost(VILLAGER_COST)) {
-      if (this.verboseLogs) console.log('Train blocked: not enough food');
-      this.showFloatingMessage(`Need: ${this.formatCost(VILLAGER_COST)}`);
-      this.addGameMessage(`Need ${this.formatCost(VILLAGER_COST)}`, UI_STYLE.textWarn);
-      return;
-    }
-
-    if (this.verboseLogs) console.log('Train villager:', { food: this.playerResources.food, pop: `${this.populationUsed}/${this.populationCap}`, tc: building.id });
-
-    const cx = building.buildX + building.footprintW / 2;
-    const cy = building.buildY + building.footprintH / 2;
-    const spawnDist = Math.max(building.footprintW, building.footprintH) / 2 + 2;
-    let px, py;
-
-    const directions = [
-      { x: cx, y: cy + spawnDist },
-      { x: cx, y: cy - spawnDist },
-      { x: cx + spawnDist, y: cy },
-      { x: cx - spawnDist, y: cy },
-    ];
-
-    let found = false;
-    for (const dir of directions) {
-      const bgx = Math.floor(dir.x);
-      const bgy = Math.floor(dir.y);
-      if (bgx >= 0 && bgx < this.buildGridWidth && bgy >= 0 && bgy < this.buildGridHeight && this.buildGrid[bgy][bgx].pathable) {
-        px = bgx * SCALE.BUILD_CELL_SIZE + SCALE.BUILD_CELL_SIZE / 2;
-        py = bgy * SCALE.BUILD_CELL_SIZE + SCALE.BUILD_CELL_SIZE / 2;
-        found = true;
-        break;
-      }
-    }
-
-    if (!found) {
-      px = cx * SCALE.BUILD_CELL_SIZE;
-      py = (cy + spawnDist) * SCALE.BUILD_CELL_SIZE;
-    }
-
-    const villager = {
-      id: `unit_${this.nextUnitId++}`,
-      ownerId: this.playerId,
-      type: 'villager',
-      x: px, y: py,
-      targetX: px, targetY: py,
-      speed: 80,
-      selected: false,
-      state: 'idle',
-      path: [],
-      pathIndex: 0,
-      carryResource: null,
-      carryAmount: 0,
-      carryCapacity: 10,
-      workState: 'idle',
-      gatherTargetId: null,
-      gatherResourceType: null,
-      dropoffTargetId: null,
-      gatherTimer: 0,
-    };
-
-    this.units.push(villager);
-    this.renderUnits();
-    this.showFloatingMessage('Villager trained!', this.scale.width / 2, 58, UI_STYLE.textGood);
-    this.addGameMessage('Villager trained', UI_STYLE.textGood);
-    if (this.ui) this.ui.lastActionPanelKey = null;
-    this.ui?.updateActionPanel();
-    if (this.verboseLogs) console.log('Villager trained at:', building.id, { x: px, y: py });
+    this.buildings.trainVillager(building);
   }
 
   pointInRect(px, py, x, y, w, h) {
@@ -1350,124 +1193,19 @@ class GameScene extends Phaser.Scene {
   }
 
   placeBuilding(type, buildX, buildY) {
-    const def = BUILDING_DEFS[type];
-    const building = {
-      id: `building_${this.nextBuildingId++}`,
-      ownerId: this.playerId,
-      type,
-      buildX, buildY,
-      footprintW: def.w, footprintH: def.h,
-      worldX: buildX * SCALE.BUILD_CELL_SIZE,
-      worldY: buildY * SCALE.BUILD_CELL_SIZE,
-      hp: def.hp,
-      constructionTimer: def.buildTimeMs || 0,
-      constructed: (def.buildTimeMs || 0) <= 0,
-    };
-
-    for (let dx = 0; dx < def.w; dx++) {
-      for (let dy = 0; dy < def.h; dy++) {
-        const gx = buildX + dx;
-        const gy = buildY + dy;
-        if (gx >= 0 && gx < this.buildGridWidth && gy >= 0 && gy < this.buildGridHeight) {
-          const cell = this.buildGrid[gy][gx];
-          cell.buildable = false;
-          cell.pathable = false;
-          cell.occupiedBy = building.id;
-        }
-      }
-    }
-
-    this.buildings.push(building);
-    this.renderBuildings();
-
-    if (type === 'town_center' && building.constructed) {
-      this.populationCap += POPULATION.BASE_CAP;
-      this.spawnStartingVillagers(building);
-    }
-
-    this.addGameMessage(`${def.label} placed`, UI_STYLE.textGood);
-    if (this.verboseLogs) console.log(`BUILD PLACED: ${type} at build (${buildX}, ${buildY}) px (${building.worldX}, ${building.worldY}) constructed:${building.constructed}`);
-    return building;
+    return this.buildings.placeBuilding(type, buildX, buildY);
   }
 
   spawnStartingVillagers(tc) {
-    const cx = tc.buildX + tc.footprintW / 2;
-    const cy = tc.buildY + tc.footprintH / 2;
-    const offsets = [
-      { x: -2, y: tc.footprintH / 2 },
-      { x: tc.footprintW + 2, y: tc.footprintH / 2 },
-      { x: tc.footprintW / 2, y: tc.footprintH + 2 },
-    ];
-
-    for (const off of offsets) {
-      const sx = (cx + off.x) * SCALE.BUILD_CELL_SIZE;
-      const sy = (cy + off.y) * SCALE.BUILD_CELL_SIZE;
-
-      // validate: check the build cell is pathable
-      const bgx = Math.floor((cx + off.x));
-      const bgy = Math.floor((cy + off.y));
-      let px = sx;
-      let py = sy;
-      if (bgx >= 0 && bgx < this.buildGridWidth && bgy >= 0 && bgy < this.buildGridHeight) {
-        const cell = this.buildGrid[bgy][bgx];
-        if (!cell.pathable) {
-          // find nearest pathable
-          let found = false;
-          for (let r = 1; r < 8 && !found; r++) {
-            for (let dx = -r; dx <= r && !found; dx++) {
-              for (let dy = -r; dy <= r && !found; dy++) {
-                const nx = bgx + dx;
-                const ny = bgy + dy;
-                if (nx >= 0 && nx < this.buildGridWidth && ny >= 0 && ny < this.buildGridHeight && this.buildGrid[ny][nx].pathable) {
-                  px = nx * SCALE.BUILD_CELL_SIZE + SCALE.BUILD_CELL_SIZE / 2;
-                  py = ny * SCALE.BUILD_CELL_SIZE + SCALE.BUILD_CELL_SIZE / 2;
-                  found = true;
-                }
-              }
-            }
-          }
-        }
-      }
-
-      this.units.push({
-        id: `unit_${this.nextUnitId++}`,
-        ownerId: this.playerId,
-        type: 'villager',
-        x: px, y: py,
-        targetX: px, targetY: py,
-        speed: 80,
-        selected: false,
-        state: 'idle',
-        path: [],
-        pathIndex: 0,
-        carryResource: null,
-        carryAmount: 0,
-        carryCapacity: 10,
-        workState: 'idle',
-        gatherTargetId: null,
-        gatherResourceType: null,
-        dropoffTargetId: null,
-        gatherTimer: 0,
-      });
-    }
-
-    this.renderUnits();
+    this.buildings.spawnStartingVillagers(tc);
   }
 
   startBuildingPlacement(type) {
-    const def = BUILDING_DEFS[type];
-    if (!def) return;
-    this.placementMode = { type, ...def };
-    this.ghostValid = false;
-    console.log(`Placement: ${def.label} (${def.w}x${def.h}) Cost: ${this.formatCost(def.cost || {})}`);
+    this.buildings.startBuildingPlacement(type);
   }
 
   cancelBuildingPlacement() {
-    if (this.placementMode) {
-      this.addGameMessage('Placement cancelled', UI_STYLE.textMuted);
-    }
-    this.placementMode = null;
-    this.placementGraphics.clear();
+    this.buildings.cancelBuildingPlacement();
   }
 
   jumpToFirstSite(siteType) {
@@ -1493,67 +1231,19 @@ class GameScene extends Phaser.Scene {
   }
 
   isBuildable(buildX, buildY, fw, fh) {
-    for (let dx = 0; dx < fw; dx++) {
-      for (let dy = 0; dy < fh; dy++) {
-        const gx = buildX + dx;
-        const gy = buildY + dy;
-        if (gx < 0 || gx >= this.buildGridWidth || gy < 0 || gy >= this.buildGridHeight) return false;
-        const cell = this.buildGrid[gy][gx];
-        if (!cell.buildable) return false;
-        if (cell.occupiedBy) return false;
-      }
-    }
-    return true;
+    return this.buildings.isBuildable(buildX, buildY, fw, fh);
   }
 
   getPlacementStatusText() {
-    if (!this.placementMode) return '';
-
-    const landValid = this.isBuildable(this.ghostBuildX, this.ghostBuildY, this.placementMode.w, this.placementMode.h);
-    const canAfford = this.canAffordCost(this.placementMode.cost || {});
-
-    if (!landValid) return 'Blocked';
-    if (!canAfford) return `Need ${this.formatCost(this.placementMode.cost || {})}`;
-    return 'Valid';
+    return this.buildings.getPlacementStatusText();
   }
 
   renderSelectedBuilding() {
-    this.selectedBuildingGraphics.clear();
-
-    if (!this.selectedBuilding) return;
-
-    const b = this.selectedBuilding;
-    const px = b.buildX * SCALE.BUILD_CELL_SIZE;
-    const py = b.buildY * SCALE.BUILD_CELL_SIZE;
-    const pw = b.footprintW * SCALE.BUILD_CELL_SIZE;
-    const ph = b.footprintH * SCALE.BUILD_CELL_SIZE;
-
-    this.selectedBuildingGraphics.lineStyle(3, 0x00ff00, 1);
-    this.selectedBuildingGraphics.strokeRect(px - 2, py - 2, pw + 4, ph + 4);
+    this.buildings.renderSelectedBuilding();
   }
 
   renderBuildingGhost() {
-    this.placementGraphics.clear();
-    if (!this.placementMode) return;
-
-    const landValid = this.isBuildable(this.ghostBuildX, this.ghostBuildY, this.placementMode.w, this.placementMode.h);
-    const canAfford = this.canAffordCost(this.placementMode.cost || {});
-
-    let color = 0x00ff00;
-    if (!landValid) color = 0xff0000;
-    else if (!canAfford) color = 0xffaa00;
-
-    const px = this.ghostBuildX * SCALE.BUILD_CELL_SIZE;
-    const py = this.ghostBuildY * SCALE.BUILD_CELL_SIZE;
-    const pw = this.placementMode.w * SCALE.BUILD_CELL_SIZE;
-    const ph = this.placementMode.h * SCALE.BUILD_CELL_SIZE;
-
-    this.placementGraphics.lineStyle(1, 0xffffff, 0.3);
-    this.placementGraphics.strokeRect(px, py, pw, ph);
-    this.placementGraphics.fillStyle(color, 0.15);
-    this.placementGraphics.fillRect(px, py, pw, ph);
-    this.placementGraphics.lineStyle(2, color, 0.8);
-    this.placementGraphics.strokeRect(px, py, pw, ph);
+    this.buildings.renderBuildingGhost();
   }
 
   updateUnits(delta) {
@@ -1609,60 +1299,8 @@ class GameScene extends Phaser.Scene {
 
   update(time, delta) {
     this.updateUnits(delta);
+    this.buildings.update(delta);
     this.ui.update();
-
-    this.farmTickTimer += delta;
-    if (this.farmTickTimer >= FARM_TICK_INTERVAL_MS) {
-      this.farmTickTimer -= FARM_TICK_INTERVAL_MS;
-      let producedFood = 0;
-      for (const b of this.buildings) {
-        if (b.constructed && b.type === 'farm' && b.ownerId === this.playerId) {
-          producedFood += FOOD_PER_FARM_TICK;
-        }
-      }
-      if (producedFood > 0) {
-        this.playerResources.food += producedFood;
-        this.updateResourceHud();
-        if (this.ui) this.ui.lastActionPanelKey = null;
-        this.ui?.updateActionPanel();
-        this.ui?.updateCommandPanel();
-        this.showFloatingMessage(`+${producedFood} food`, this.scale.width / 2, 92, UI_STYLE.textGood);
-        this.addGameMessage(`+${producedFood} food from farms`, UI_STYLE.textGood);
-      }
-    }
-
-    let buildingUpdated = false;
-    for (const b of this.buildings) {
-      if (b.constructed) continue;
-      b.constructionTimer -= delta;
-      if (b.constructionTimer <= 0) {
-        b.constructionTimer = 0;
-        b.constructed = true;
-        if (b.type === 'house') {
-          this.populationCap += POPULATION.PER_HOUSE;
-        }
-        if (b.type === 'town_center') {
-          this.populationCap += POPULATION.BASE_CAP;
-          this.spawnStartingVillagers(b);
-        }
-        buildingUpdated = true;
-        const def = BUILDING_DEFS[b.type];
-        if (def) {
-          this.showFloatingMessage(`${def.label} complete`, this.scale.width / 2, 92, UI_STYLE.textGood);
-          this.addGameMessage(`${def.label} complete`, UI_STYLE.textGood);
-        }
-      }
-    }
-    if (buildingUpdated) {
-      this.renderBuildings();
-    }
-
-    if (this.placementMode) {
-      const landValid = this.isBuildable(this.ghostBuildX, this.ghostBuildY, this.placementMode.w, this.placementMode.h);
-      const canAfford = this.canAffordCost(this.placementMode.cost || {});
-      this.ghostValid = landValid && canAfford;
-      this.renderBuildingGhost();
-    }
 
     if (!this.debugText) return;
 
