@@ -83,7 +83,7 @@ class UISystem {
   updateResourceHud() {
     if (!this.resourceTexts) return;
     const scene = this.scene;
-    scene.populationUsed = scene.units.filter(u => u.ownerId === scene.playerId).length;
+    scene.refreshPopulationUsed();
 
     for (const [key, text] of Object.entries(this.resourceTexts)) {
       if (key === 'population') {

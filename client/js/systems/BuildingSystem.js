@@ -284,7 +284,7 @@ class BuildingSystem {
     const scene = this.scene;
     if (!building) return;
 
-    if (scene.populationUsed >= scene.populationCap) {
+    if (!scene.hasPopulationRoom(1)) {
       if (scene.verboseLogs) console.log('Train blocked: population cap reached');
       scene.showFloatingMessage('Population cap reached!');
       scene.addGameMessage('Population cap reached!', UI_STYLE.textWarn);
@@ -298,7 +298,8 @@ class BuildingSystem {
       return;
     }
 
-    if (scene.verboseLogs) console.log('Train villager:', { food: scene.playerResources.food, pop: `${scene.populationUsed}/${scene.populationCap}`, tc: building.id });
+    const popUsed = scene.getPopulationUsed();
+    if (scene.verboseLogs) console.log('Train villager:', { food: scene.playerResources.food, pop: `${popUsed}/${scene.populationCap}`, tc: building.id });
 
     const cx = building.buildX + building.footprintW / 2;
     const cy = building.buildY + building.footprintH / 2;
@@ -351,6 +352,8 @@ class BuildingSystem {
     };
 
     scene.units.push(villager);
+    scene.refreshPopulationUsed();
+    scene.updateResourceHud();
     scene.renderUnits();
     scene.showFloatingMessage('Villager trained!', scene.scale.width / 2, 58, UI_STYLE.textGood);
     scene.addGameMessage('Villager trained', UI_STYLE.textGood);
