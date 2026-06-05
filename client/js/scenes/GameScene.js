@@ -293,9 +293,9 @@ class GameScene extends Phaser.Scene {
       this.playerResources[resource] -= amount;
     }
     this.updateResourceHud();
-    this.lastActionPanelKey = null;
-    this.updateActionPanel?.();
-    this.updateCommandPanel?.();
+    if (this.ui) this.ui.lastActionPanelKey = null;
+    this.ui?.updateActionPanel();
+    this.ui?.updateCommandPanel();
     return true;
   }
 
@@ -577,6 +577,7 @@ class GameScene extends Phaser.Scene {
     this.selectedBuildingGraphics = this.add.graphics().setDepth(45);
 
     this.pathfinding = new PathfindingSystem(this);
+    this.ui = new UISystem(this);
 
     this.worldObjects = (this.worldObjects || []).concat([
       this.terrainGraphics, this.siteGraphics, this.placementGraphics,
@@ -591,8 +592,8 @@ class GameScene extends Phaser.Scene {
     this.renderSpawns();
 
     this.setupCameras();
-    this.createUI();
 
+    this.ui.create();
     this.syncCameraIgnores();
 
     this.input.mouse.disableContextMenu();
@@ -618,7 +619,7 @@ class GameScene extends Phaser.Scene {
 
     this.input.keyboard.on('keydown-V', () => {
       this.verboseLogs = !this.verboseLogs;
-      this.addGameMessage(`Verbose logs ${this.verboseLogs ? 'on' : 'off'}`, UI_STYLE.textMuted);
+      this.ui?.addGameMessage(`Verbose logs ${this.verboseLogs ? 'on' : 'off'}`, UI_STYLE.textMuted);
     });
 
     this.input.keyboard.on('keydown-TAB', (event) => {
@@ -844,62 +845,25 @@ class GameScene extends Phaser.Scene {
     if (this.worldObjects?.length) this.uiCamera.ignore(this.worldObjects);
   }
 
-  createUI() {
-    this.createResourceHud();
-    this.createSelectedPanel();
-    this.createCommandPanel();
-    this.createActionPanel();
-    this.createDebugPanel();
-    this.createHotkeyHelp();
-    this.createMessageLog();
-    this.layoutUI();
-
-    this.scale.on('resize', (gameSize) => {
-      if (this.uiCamera) {
-        this.uiCamera.setSize(gameSize.width, gameSize.height);
-      }
-      this.layoutUI();
-    });
+  toggleDebug() {
+    this.debugVisible = !this.debugVisible;
+    if (this.ui) this.ui.debugPanel.visible = this.debugVisible;
   }
 
-  addGameMessage(text, color = UI_STYLE.textPrimary) {
-    this.eventLog.unshift({ text, color, timestamp: Date.now() });
-    this.eventLog = this.eventLog.slice(0, 4);
-    this.updateMessageLog?.();
+  showFloatingMessage(text, x, y, color) {
+    return this.ui?.showFloatingMessage(text, x, y, color);
   }
 
-  createMessageLog() {
-    this.messageLogPanel = this.registerUIObject(this.add.container(12, 50));
-    this.messageLogPanel.setDepth(UI_DEPTH);
-
-    this.messageLogTexts = [];
-
-    for (let i = 0; i < 4; i++) {
-      const t = this.add.text(0, i * 18, '', {
-        fontSize: '12px',
-        color: UI_STYLE.textMuted,
-        fontFamily: UI_STYLE.fontFamily,
-      });
-
-      this.messageLogPanel.add(t);
-      this.messageLogTexts.push(t);
-    }
+  addGameMessage(text, color) {
+    return this.ui?.addGameMessage(text, color);
   }
 
-  updateMessageLog() {
-    if (!this.messageLogTexts) return;
+  isPointerOverUI(pointer) {
+    return this.ui?.isPointerOverUI(pointer) ?? false;
+  }
 
-    for (let i = 0; i < this.messageLogTexts.length; i++) {
-      const msg = this.eventLog[i];
-
-      if (!msg) {
-        this.messageLogTexts[i].setText('');
-        continue;
-      }
-
-      this.messageLogTexts[i].setText(msg.text);
-      this.messageLogTexts[i].setColor(msg.color);
-    }
+  updateResourceHud() {
+    this.ui?.updateResourceHud();
   }
 
   createResourceHud() {
@@ -1509,6 +1473,8 @@ class GameScene extends Phaser.Scene {
     this.renderUnits();
     this.showFloatingMessage('Villager trained!', this.scale.width / 2, 58, UI_STYLE.textGood);
     this.addGameMessage('Villager trained', UI_STYLE.textGood);
+    if (this.ui) this.ui.lastActionPanelKey = null;
+    this.ui?.updateActionPanel();
     if (this.verboseLogs) console.log('Villager trained at:', building.id, { x: px, y: py });
   }
 
@@ -1933,11 +1899,7 @@ class GameScene extends Phaser.Scene {
 
   update(time, delta) {
     this.updateUnits(delta);
-    this.updateResourceHud();
-    this.updateSelectedPanel();
-    this.updateCommandPanel();
-    this.updateActionPanel();
-    this.updateMessageLog();
+    this.ui.update();
 
     this.farmTickTimer += delta;
     if (this.farmTickTimer >= FARM_TICK_INTERVAL_MS) {
@@ -1951,9 +1913,9 @@ class GameScene extends Phaser.Scene {
       if (producedFood > 0) {
         this.playerResources.food += producedFood;
         this.updateResourceHud();
-        this.lastActionPanelKey = null;
-        this.updateActionPanel();
-        this.updateCommandPanel();
+        if (this.ui) this.ui.lastActionPanelKey = null;
+        this.ui?.updateActionPanel();
+        this.ui?.updateCommandPanel();
         this.showFloatingMessage(`+${producedFood} food`, this.scale.width / 2, 92, UI_STYLE.textGood);
         this.addGameMessage(`+${producedFood} food from farms`, UI_STYLE.textGood);
       }
