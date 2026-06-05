@@ -43,6 +43,11 @@ class GameScene extends Phaser.Scene {
     this.selectedBuilding = null;
     this.farmTickTimer = 0;
 
+    this.lastActionPanelKey = null;
+
+    this.worldObjects = [];
+    this.uiObjects = [];
+
     this.buildGridWidth = this.width * SCALE.BUILD_CELLS_PER_TILE;
     this.buildGridHeight = this.height * SCALE.BUILD_CELLS_PER_TILE;
     this.buildGrid = [];
@@ -680,8 +685,20 @@ class GameScene extends Phaser.Scene {
       return;
     }
 
-    this.cameras.main.setBackgroundColor(0x111111);
-    this.cameras.main.setZoom(1);
+    this.debugVisible = false;
+    this.showSiteBounds = false;
+    this.showEntityIcons = true;
+    this.showTerrainGrid = false;
+    this.placementMode = null;
+    this.ghostBuildX = 0;
+    this.ghostBuildY = 0;
+    this.ghostValid = false;
+
+    this.selectedBuilding = null;
+
+    this.worldCamera = this.cameras.main;
+    this.worldCamera.setBackgroundColor(0x111111);
+    this.worldCamera.setZoom(1);
 
     this.terrainGraphics = this.add.graphics().setDepth(0);
     this.siteGraphics = this.add.graphics().setDepth(5);
@@ -693,23 +710,21 @@ class GameScene extends Phaser.Scene {
     this.unitGraphics = this.add.graphics().setDepth(30);
     this.selectionGraphics = this.add.graphics().setDepth(40);
 
-    this.debugVisible = false;
-    this.showSiteBounds = false;
-    this.showEntityIcons = true;
-    this.placementMode = null;
-    this.ghostBuildX = 0;
-    this.ghostBuildY = 0;
-    this.ghostValid = false;
-
-    this.selectedBuilding = null;
+    this.worldObjects = (this.worldObjects || []).concat([
+      this.terrainGraphics, this.siteGraphics, this.placementGraphics,
+      this.entityGraphics, this.buildingGraphics, this.spawnGraphics,
+      this.pathGraphics, this.unitGraphics, this.selectionGraphics,
+    ]);
 
     this.renderTerrain();
     this.renderEntities();
     this.renderSiteBounds();
     this.renderSpawns();
 
-    this.setupCamera();
+    this.setupCameras();
     this.createUI();
+
+    this.syncCameraIgnores();
 
     this.input.mouse.disableContextMenu();
 
@@ -732,11 +747,17 @@ class GameScene extends Phaser.Scene {
     this.input.keyboard.on('keydown-I', () => this.jumpToFirstResource('iron'));
     this.input.keyboard.on('keydown-O', () => this.jumpToFirstResource('stone'));
 
+    this.input.keyboard.on('keydown-TAB', (event) => {
+      event.event?.preventDefault?.();
+      this.showTerrainGrid = !this.showTerrainGrid;
+      this.renderTerrain();
+    });
+
     this.input.on('pointerdown', (pointer) => this.onPointerDown(pointer));
   }
 
   getPointerWorldPx(pointer = this.input.activePointer) {
-    const worldPoint = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
+    const worldPoint = this.worldCamera.getWorldPoint(pointer.x, pointer.y);
     return { x: worldPoint.x, y: worldPoint.y };
   }
 
@@ -755,8 +776,8 @@ class GameScene extends Phaser.Scene {
       g.fillStyle(color, 1);
       g.fillRect(x, y, s, s);
 
-      if (tile.t === 1) {
-        g.lineStyle(1, 0x1a4a7a, 0.3);
+      if (this.showTerrainGrid) {
+        g.lineStyle(1, 0x000000, 0.16);
         g.strokeRect(x, y, s, s);
       }
 
@@ -902,15 +923,22 @@ class GameScene extends Phaser.Scene {
     }
   }
 
-  setupCamera() {
+  setupCameras() {
     const worldW = this.width * SCALE.TERRAIN_TILE_SIZE;
     const worldH = this.height * SCALE.TERRAIN_TILE_SIZE;
-    this.cameras.main.setBounds(0, 0, worldW, worldH);
+
+    this.worldCamera = this.cameras.main;
+    this.worldCamera.setBounds(0, 0, worldW, worldH);
+    this.worldCamera.setZoom(1);
+
+    this.uiCamera = this.cameras.add(0, 0, this.scale.width, this.scale.height);
+    this.uiCamera.setScroll(0, 0);
+    this.uiCamera.setZoom(1);
 
     this.input.on('pointermove', (pointer) => {
-      if (pointer.isDown && pointer.downElement === this.game.canvas) {
-        this.cameras.main.scrollX -= (pointer.x - pointer.prevPosition.x) / this.cameras.main.zoom;
-        this.cameras.main.scrollY -= (pointer.y - pointer.prevPosition.y) / this.cameras.main.zoom;
+      if (pointer.isDown && pointer.downElement === this.game.canvas && !this.isPointerOverUI(pointer)) {
+        this.worldCamera.scrollX -= (pointer.x - pointer.prevPosition.x) / this.worldCamera.zoom;
+        this.worldCamera.scrollY -= (pointer.y - pointer.prevPosition.y) / this.worldCamera.zoom;
       }
 
       const wp = this.getPointerWorldPx(pointer);
@@ -919,27 +947,44 @@ class GameScene extends Phaser.Scene {
     });
 
     this.input.on('wheel', (pointer, gameObjects, deltaX, deltaY) => {
-      const zoom = this.cameras.main.zoom;
+      if (this.isPointerOverUI(pointer)) return;
+      const zoom = this.worldCamera.zoom;
       const newZoom = Phaser.Math.Clamp(zoom - deltaY * 0.001, 0.5, 4);
-      this.cameras.main.setZoom(newZoom);
+      this.worldCamera.setZoom(newZoom);
     });
+  }
+
+  registerUIObject(obj) {
+    if (!this.uiObjects) this.uiObjects = [];
+    this.uiObjects.push(obj);
+    return obj;
+  }
+
+  syncCameraIgnores() {
+    if (!this.worldCamera || !this.uiCamera) return;
+    if (this.uiObjects?.length) this.worldCamera.ignore(this.uiObjects);
+    if (this.worldObjects?.length) this.uiCamera.ignore(this.worldObjects);
   }
 
   createUI() {
     this.createResourceHud();
     this.createSelectedPanel();
     this.createCommandPanel();
+    this.createActionPanel();
     this.createDebugPanel();
     this.createHotkeyHelp();
     this.layoutUI();
 
-    this.scale.on('resize', () => {
+    this.scale.on('resize', (gameSize) => {
+      if (this.uiCamera) {
+        this.uiCamera.setSize(gameSize.width, gameSize.height);
+      }
       this.layoutUI();
     });
   }
 
   createResourceHud() {
-    this.resourceHud = this.add.container(12, 10);
+    this.resourceHud = this.registerUIObject(this.add.container(12, 10));
     this.resourceHud.setScrollFactor(0);
     this.resourceHud.setDepth(200);
 
@@ -1007,7 +1052,7 @@ class GameScene extends Phaser.Scene {
     const x = Math.floor((this.scale.width - panelWidth) / 2);
     const y = this.scale.height - panelHeight - 12;
 
-    this.commandPanel = this.add.container(x, y);
+    this.commandPanel = this.registerUIObject(this.add.container(x, y));
     this.commandPanel.setScrollFactor(0);
     this.commandPanel.setDepth(200);
 
@@ -1041,35 +1086,6 @@ class GameScene extends Phaser.Scene {
       this.commandPanel.add(button.container);
       this.buildButtons.push(button);
     });
-
-    this.commandActionBtn = this.add.container(panelWidth - 200, 8);
-    this.commandActionBtn.setVisible(false);
-    this.commandPanel.add(this.commandActionBtn);
-
-    const actionBg = this.add.rectangle(0, 0, 186, 60, UI_STYLE.buttonBg, 0.95)
-      .setOrigin(0, 0)
-      .setInteractive({ useHandCursor: true });
-
-    const actionBorder = this.add.rectangle(0, 0, 186, 60)
-      .setOrigin(0, 0)
-      .setStrokeStyle(1, UI_STYLE.panelBorder, 0.8);
-
-    const actionLabel = this.add.text(8, 6, '', {
-      fontSize: '11px',
-      color: UI_STYLE.textPrimary,
-      fontFamily: UI_STYLE.fontFamily,
-    });
-
-    this.commandActionBtn.add([actionBg, actionBorder, actionLabel]);
-    this.commandActionBtn.bg = actionBg;
-    this.commandActionBtn.border = actionBorder;
-    this.commandActionBtn.label = actionLabel;
-
-    actionBg.on('pointerdown', () => {
-      if (this.selectedBuilding && this.selectedBuilding.type === 'town_center' && this.selectedBuilding.constructed) {
-        this.trainVillager(this.selectedBuilding);
-      }
-    });
   }
 
   createBuildButton(type, def, x, y) {
@@ -1091,16 +1107,21 @@ class GameScene extends Phaser.Scene {
 
     container.add([bg, border, label]);
 
-    bg.on('pointerdown', () => {
+    bg.on('pointerdown', (pointer, localX, localY, event) => {
+      if (event) event.stopPropagation();
       this.startBuildingPlacement(type);
     });
 
     bg.on('pointerover', () => {
-      bg.setFillStyle(UI_STYLE.buttonBgHover, 1);
+      const canAfford = this.canAffordCost(def.cost || {});
+      if (canAfford) {
+        bg.setFillStyle(UI_STYLE.buttonBgHover, 1);
+      }
     });
 
     bg.on('pointerout', () => {
-      bg.setFillStyle(UI_STYLE.buttonBg, 0.95);
+      const canAfford = this.canAffordCost(def.cost || {});
+      bg.setFillStyle(canAfford ? UI_STYLE.buttonBg : UI_STYLE.buttonBgDisabled, canAfford ? 0.95 : 0.9);
     });
 
     return { type, def, container, bg, border, label };
@@ -1114,10 +1135,10 @@ class GameScene extends Phaser.Scene {
       const canAfford = this.canAffordCost(cost);
 
       const hotkey = button.def.hotkey;
-      const name = button.def.label;
+      const shortName = button.def.shortLabel || button.def.label;
       const costText = this.formatCost(cost);
 
-      button.label.setText(`${hotkey} ${name} - ${costText}`);
+      button.label.setText(`${hotkey} ${shortName} · ${costText}`);
 
       if (canAfford) {
         button.bg.setFillStyle(UI_STYLE.buttonBg, 0.95);
@@ -1129,28 +1150,122 @@ class GameScene extends Phaser.Scene {
         button.border.setStrokeStyle(1, 0x333333, 0.6);
       }
     }
+  }
 
-    if (this.commandActionBtn) {
-      const b = this.selectedBuilding;
-      if (b && b.type === 'town_center' && b.constructed) {
-        this.commandActionBtn.setVisible(true);
-        const canAfford = this.canAffordCost(VILLAGER_COST);
-        const popOk = this.populationUsed < this.populationCap;
-        const enabled = canAfford && popOk;
+  createActionPanel() {
+    const panelWidth = 260;
+    const panelHeight = 112;
 
-        this.commandActionBtn.label.setText(`R Train Villager - 50f\n${enabled ? '' : '(blocked)'}`);
+    this.actionPanel = this.registerUIObject(
+      this.add.container(this.scale.width - panelWidth - 12, this.scale.height - panelHeight - 12)
+    );
+    this.actionPanel.setScrollFactor(0);
+    this.actionPanel.setDepth(200);
 
-        if (enabled) {
-          this.commandActionBtn.bg.setFillStyle(UI_STYLE.buttonBgHover, 0.95);
-          this.commandActionBtn.label.setColor(UI_STYLE.textPrimary);
-        } else {
-          this.commandActionBtn.bg.setFillStyle(UI_STYLE.buttonBgDisabled, 0.9);
-          this.commandActionBtn.label.setColor(UI_STYLE.textMuted);
-        }
-      } else {
-        this.commandActionBtn.setVisible(false);
-      }
+    const bg = this.add.rectangle(0, 0, panelWidth, panelHeight, UI_STYLE.panelBg, UI_STYLE.panelBgAlpha)
+      .setOrigin(0, 0);
+
+    const border = this.add.rectangle(0, 0, panelWidth, panelHeight)
+      .setOrigin(0, 0)
+      .setStrokeStyle(1, UI_STYLE.panelBorder, 0.9);
+
+    const title = this.add.text(12, 8, 'Actions', {
+      fontSize: '14px',
+      color: UI_STYLE.textPrimary,
+      fontFamily: UI_STYLE.fontFamily,
+    });
+
+    this.actionPanel.add([bg, border, title]);
+
+    this.actionButtons = [];
+  }
+
+  clearActionPanelButtons() {
+    if (!this.actionButtons) return;
+    for (const btn of this.actionButtons) {
+      btn.container.destroy();
     }
+    this.actionButtons = [];
+  }
+
+  createActionButton(labelText, x, y, enabled, onClick) {
+    const container = this.add.container(x, y);
+
+    const bgColor = enabled ? UI_STYLE.buttonBg : UI_STYLE.buttonBgDisabled;
+
+    const bg = this.add.rectangle(0, 0, 236, 28, bgColor, 0.95)
+      .setOrigin(0, 0)
+      .setInteractive({ useHandCursor: enabled });
+
+    const border = this.add.rectangle(0, 0, 236, 28)
+      .setOrigin(0, 0)
+      .setStrokeStyle(1, enabled ? UI_STYLE.buttonBorder : 0x333333, 0.8);
+
+    const label = this.add.text(8, 6, labelText, {
+      fontSize: '11px',
+      color: enabled ? UI_STYLE.textPrimary : UI_STYLE.textMuted,
+      fontFamily: UI_STYLE.fontFamily,
+    });
+
+    container.add([bg, border, label]);
+
+    if (enabled) {
+      bg.on('pointerdown', (pointer, localX, localY, event) => {
+        if (event) event.stopPropagation();
+        onClick();
+      });
+
+      bg.on('pointerover', () => bg.setFillStyle(UI_STYLE.buttonBgHover, 1));
+      bg.on('pointerout', () => bg.setFillStyle(UI_STYLE.buttonBg, 0.95));
+    }
+
+    this.actionPanel.add(container);
+    this.actionButtons.push({ container, bg, label, border });
+
+    return container;
+  }
+
+  updateActionPanel() {
+    if (!this.actionPanel) return;
+
+    let key = 'none';
+
+    if (this.selectedBuilding && this.selectedBuilding.type === 'town_center' && this.selectedBuilding.constructed) {
+      const canAfford = this.canAffordCost(VILLAGER_COST);
+      const hasPop = this.populationUsed < this.populationCap;
+      key = `train_${canAfford}_${hasPop}`;
+    } else if (this.selectedBuilding) {
+      key = `building_${this.selectedBuilding.type}`;
+    }
+
+    if (key === this.lastActionPanelKey) return;
+    this.lastActionPanelKey = key;
+
+    this.clearActionPanelButtons();
+
+    if (
+      this.selectedBuilding &&
+      this.selectedBuilding.type === 'town_center' &&
+      this.selectedBuilding.constructed
+    ) {
+      const canAfford = this.canAffordCost(VILLAGER_COST);
+      const hasPop = this.populationUsed < this.populationCap;
+      const enabled = canAfford && hasPop;
+
+      let label = `R Train Villager - ${this.formatCost(VILLAGER_COST)}`;
+
+      if (!hasPop) label = 'R Train Villager - Pop full';
+      else if (!canAfford) label = `R Train Villager - Need ${this.formatCost(VILLAGER_COST)}`;
+
+      this.createActionButton(label, 12, 34, enabled, () => {
+        this.trainVillager(this.selectedBuilding);
+        this.updateActionPanel();
+      });
+
+      return;
+    }
+
+    this.createActionButton('No actions', 12, 34, false, () => {});
   }
 
   createSelectedPanel() {
@@ -1159,7 +1274,7 @@ class GameScene extends Phaser.Scene {
     const x = 12;
     const y = this.scale.height - panelHeight - 12;
 
-    this.selectedPanel = this.add.container(x, y);
+    this.selectedPanel = this.registerUIObject(this.add.container(x, y));
     this.selectedPanel.setScrollFactor(0);
     this.selectedPanel.setDepth(200);
 
@@ -1248,7 +1363,7 @@ class GameScene extends Phaser.Scene {
     const panelWidth = 360;
     const panelHeight = 270;
 
-    this.debugPanel = this.add.container(this.scale.width - panelWidth - 12, 50);
+    this.debugPanel = this.registerUIObject(this.add.container(this.scale.width - panelWidth - 12, 50));
     this.debugPanel.setScrollFactor(0);
     this.debugPanel.setDepth(250);
 
@@ -1268,16 +1383,16 @@ class GameScene extends Phaser.Scene {
   }
 
   createHotkeyHelp() {
-    this.hotkeyHelpText = this.add.text(
+    this.hotkeyHelpText = this.registerUIObject(this.add.text(
       this.scale.width - 12,
       12,
-      '` Debug   RMB Move/Gather   Wheel Zoom   Drag Pan',
+      '` Debug   RMB Move/Gather   Wheel Zoom   Drag Pan   Tab Grid',
       {
         fontSize: '11px',
         color: UI_STYLE.textMuted,
         fontFamily: UI_STYLE.fontFamily,
       }
-    );
+    ));
 
     this.hotkeyHelpText.setOrigin(1, 0);
     this.hotkeyHelpText.setScrollFactor(0);
@@ -1294,6 +1409,10 @@ class GameScene extends Phaser.Scene {
         Math.floor((this.scale.width - 620) / 2),
         this.scale.height - 124
       );
+    }
+
+    if (this.actionPanel) {
+      this.actionPanel.setPosition(this.scale.width - 272, this.scale.height - 124);
     }
 
     if (this.hotkeyHelpText) {
@@ -1703,8 +1822,8 @@ class GameScene extends Phaser.Scene {
       console.warn('No site found:', siteType);
       return;
     }
-    this.cameras.main.centerOn(site.center.x * SCALE.TERRAIN_TILE_SIZE, site.center.y * SCALE.TERRAIN_TILE_SIZE);
-    this.cameras.main.setZoom(2);
+    this.worldCamera.centerOn(site.center.x * SCALE.TERRAIN_TILE_SIZE, site.center.y * SCALE.TERRAIN_TILE_SIZE);
+    this.worldCamera.setZoom(2);
     console.log('Jumped to site:', site);
   }
 
@@ -1714,8 +1833,8 @@ class GameScene extends Phaser.Scene {
       console.warn('No resource entity found:', resourceType);
       return;
     }
-    this.cameras.main.centerOn(entity.position.x * SCALE.TERRAIN_TILE_SIZE, entity.position.y * SCALE.TERRAIN_TILE_SIZE);
-    this.cameras.main.setZoom(2);
+    this.worldCamera.centerOn(entity.position.x * SCALE.TERRAIN_TILE_SIZE, entity.position.y * SCALE.TERRAIN_TILE_SIZE);
+    this.worldCamera.setZoom(2);
     console.log('Jumped to resource entity:', entity);
   }
 
@@ -1813,6 +1932,7 @@ class GameScene extends Phaser.Scene {
     this.updateResourceHud();
     this.updateSelectedPanel();
     this.updateCommandPanel();
+    this.updateActionPanel();
 
     this.farmTickTimer += delta;
     if (this.farmTickTimer >= FARM_TICK_INTERVAL_MS) {
@@ -1864,7 +1984,7 @@ class GameScene extends Phaser.Scene {
 
     if (!this.debugText) return;
 
-    const cam = this.cameras.main;
+    const cam = this.worldCamera;
     const zoom = cam.zoom.toFixed(1);
     const scrollX = Math.floor(cam.scrollX);
     const scrollY = Math.floor(cam.scrollY);
