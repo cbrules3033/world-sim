@@ -1,3 +1,5 @@
+const UI_DEPTH = 1000;
+
 class GameScene extends Phaser.Scene {
   constructor() {
     super('GameScene');
@@ -434,6 +436,9 @@ class GameScene extends Phaser.Scene {
       this.playerResources[resource] -= amount;
     }
     this.updateResourceHud();
+    this.lastActionPanelKey = null;
+    this.updateActionPanel?.();
+    this.updateCommandPanel?.();
     return true;
   }
 
@@ -446,17 +451,19 @@ class GameScene extends Phaser.Scene {
   }
 
   showFloatingMessage(text, x = this.scale.width / 2, y = 58, color = '#ffcc00') {
-    const msg = this.add.text(x, y, text, {
+    const msg = this.registerUIObject(this.add.text(x, y, text, {
       fontSize: '14px',
       color,
       fontFamily: UI_STYLE.fontFamily,
       backgroundColor: '#000000cc',
       padding: { x: 10, y: 6 },
-    });
+    }));
 
     msg.setOrigin(0.5, 0);
     msg.setScrollFactor(0);
-    msg.setDepth(400);
+    msg.setDepth(UI_DEPTH + 50);
+
+    this.syncCameraIgnores();
 
     this.tweens.add({
       targets: msg,
@@ -774,7 +781,9 @@ class GameScene extends Phaser.Scene {
 
       const color = TERRAIN_COLORS[tile.t] || 0x4a8c3f;
       g.fillStyle(color, 1);
-      g.fillRect(x, y, s, s);
+
+      const bleed = this.showTerrainGrid ? 0 : 1;
+      g.fillRect(x - bleed, y - bleed, s + bleed * 2, s + bleed * 2);
 
       if (this.showTerrainGrid) {
         g.lineStyle(1, 0x000000, 0.16);
@@ -930,10 +939,12 @@ class GameScene extends Phaser.Scene {
     this.worldCamera = this.cameras.main;
     this.worldCamera.setBounds(0, 0, worldW, worldH);
     this.worldCamera.setZoom(1);
+    this.worldCamera.roundPixels = true;
 
     this.uiCamera = this.cameras.add(0, 0, this.scale.width, this.scale.height);
     this.uiCamera.setScroll(0, 0);
     this.uiCamera.setZoom(1);
+    this.uiCamera.roundPixels = true;
 
     this.input.on('pointermove', (pointer) => {
       if (pointer.isDown && pointer.downElement === this.game.canvas && !this.isPointerOverUI(pointer)) {
@@ -986,7 +997,7 @@ class GameScene extends Phaser.Scene {
   createResourceHud() {
     this.resourceHud = this.registerUIObject(this.add.container(12, 10));
     this.resourceHud.setScrollFactor(0);
-    this.resourceHud.setDepth(200);
+    this.resourceHud.setDepth(UI_DEPTH);
 
     this.resourceTexts = {};
 
@@ -1054,7 +1065,7 @@ class GameScene extends Phaser.Scene {
 
     this.commandPanel = this.registerUIObject(this.add.container(x, y));
     this.commandPanel.setScrollFactor(0);
-    this.commandPanel.setDepth(200);
+    this.commandPanel.setDepth(UI_DEPTH);
 
     const bg = this.add.rectangle(0, 0, panelWidth, panelHeight, UI_STYLE.panelBg, UI_STYLE.panelBgAlpha)
       .setOrigin(0, 0);
@@ -1109,6 +1120,9 @@ class GameScene extends Phaser.Scene {
 
     bg.on('pointerdown', (pointer, localX, localY, event) => {
       if (event) event.stopPropagation();
+      pointer.event?.preventDefault?.();
+      pointer.event?.stopPropagation?.();
+      console.log('UI build button clicked:', type);
       this.startBuildingPlacement(type);
     });
 
@@ -1160,7 +1174,7 @@ class GameScene extends Phaser.Scene {
       this.add.container(this.scale.width - panelWidth - 12, this.scale.height - panelHeight - 12)
     );
     this.actionPanel.setScrollFactor(0);
-    this.actionPanel.setDepth(200);
+    this.actionPanel.setDepth(UI_DEPTH);
 
     const bg = this.add.rectangle(0, 0, panelWidth, panelHeight, UI_STYLE.panelBg, UI_STYLE.panelBgAlpha)
       .setOrigin(0, 0);
@@ -1189,7 +1203,7 @@ class GameScene extends Phaser.Scene {
   }
 
   createActionButton(labelText, x, y, enabled, onClick) {
-    const container = this.add.container(x, y);
+    const container = this.registerUIObject(this.add.container(x, y));
 
     const bgColor = enabled ? UI_STYLE.buttonBg : UI_STYLE.buttonBgDisabled;
 
@@ -1212,6 +1226,9 @@ class GameScene extends Phaser.Scene {
     if (enabled) {
       bg.on('pointerdown', (pointer, localX, localY, event) => {
         if (event) event.stopPropagation();
+        pointer.event?.preventDefault?.();
+        pointer.event?.stopPropagation?.();
+        console.log('UI action button clicked:', labelText);
         onClick();
       });
 
@@ -1221,6 +1238,8 @@ class GameScene extends Phaser.Scene {
 
     this.actionPanel.add(container);
     this.actionButtons.push({ container, bg, label, border });
+
+    this.syncCameraIgnores();
 
     return container;
   }
@@ -1259,6 +1278,7 @@ class GameScene extends Phaser.Scene {
 
       this.createActionButton(label, 12, 34, enabled, () => {
         this.trainVillager(this.selectedBuilding);
+        this.lastActionPanelKey = null;
         this.updateActionPanel();
       });
 
@@ -1276,7 +1296,7 @@ class GameScene extends Phaser.Scene {
 
     this.selectedPanel = this.registerUIObject(this.add.container(x, y));
     this.selectedPanel.setScrollFactor(0);
-    this.selectedPanel.setDepth(200);
+    this.selectedPanel.setDepth(UI_DEPTH);
 
     const bg = this.add.rectangle(0, 0, panelWidth, panelHeight, UI_STYLE.panelBg, UI_STYLE.panelBgAlpha)
       .setOrigin(0, 0);
@@ -1365,7 +1385,7 @@ class GameScene extends Phaser.Scene {
 
     this.debugPanel = this.registerUIObject(this.add.container(this.scale.width - panelWidth - 12, 50));
     this.debugPanel.setScrollFactor(0);
-    this.debugPanel.setDepth(250);
+    this.debugPanel.setDepth(UI_DEPTH + 10);
 
     const bg = this.add.rectangle(0, 0, panelWidth, panelHeight, 0x000000, 0.75)
       .setOrigin(0, 0);
@@ -1396,7 +1416,7 @@ class GameScene extends Phaser.Scene {
 
     this.hotkeyHelpText.setOrigin(1, 0);
     this.hotkeyHelpText.setScrollFactor(0);
-    this.hotkeyHelpText.setDepth(200);
+    this.hotkeyHelpText.setDepth(UI_DEPTH);
   }
 
   layoutUI() {
@@ -1533,17 +1553,25 @@ class GameScene extends Phaser.Scene {
     console.log('Villager trained at:', building.id, { x: px, y: py });
   }
 
+  pointInRect(px, py, x, y, w, h) {
+    return px >= x && px <= x + w && py >= y && py <= y + h;
+  }
+
   isPointerOverUI(pointer) {
     const x = pointer.x;
     const y = pointer.y;
 
-    if (y <= 48) return true;
+    if (this.pointInRect(x, y, 12, 10, 744, 34)) return true;
 
-    if (y >= this.scale.height - 140) return true;
+    if (this.pointInRect(x, y, this.scale.width - 360, 8, 350, 24)) return true;
 
-    if (this.debugVisible && x >= this.scale.width - 390 && y >= 45 && y <= 340) {
-      return true;
-    }
+    if (this.pointInRect(x, y, 12, this.scale.height - 124, 260, 112)) return true;
+
+    if (this.pointInRect(x, y, Math.floor((this.scale.width - 620) / 2), this.scale.height - 124, 620, 112)) return true;
+
+    if (this.pointInRect(x, y, this.scale.width - 272, this.scale.height - 124, 260, 112)) return true;
+
+    if (this.debugVisible && this.pointInRect(x, y, this.scale.width - 372, 50, 360, 270)) return true;
 
     return false;
   }
@@ -1946,6 +1974,9 @@ class GameScene extends Phaser.Scene {
       if (producedFood > 0) {
         this.playerResources.food += producedFood;
         this.updateResourceHud();
+        this.lastActionPanelKey = null;
+        this.updateActionPanel();
+        this.updateCommandPanel();
         this.showFloatingMessage(`+${producedFood} food`, this.scale.width / 2, 92, UI_STYLE.textGood);
       }
     }
