@@ -364,6 +364,7 @@ class GameScene extends Phaser.Scene {
 
     for (const b of this.buildings) {
       if (b.ownerId !== this.playerId) continue;
+      if (!b.constructed) continue;
       if (!rules.validDropoffs.includes(b.type)) continue;
 
       const bx = b.worldX + (b.footprintW * SCALE.BUILD_CELL_SIZE) / 2;
@@ -837,6 +838,22 @@ class GameScene extends Phaser.Scene {
       const pad = SCALE.BUILD_CELL_SIZE;
       const color = BUILDING_DEFS[b.type]?.color || 0xb08a55;
 
+      if (!b.constructed) {
+        const progress = b.constructionTimer > 0 ? 1 - b.constructionTimer / (BUILDING_DEFS[b.type]?.buildTimeMs || 1) : 0;
+        this.buildingGraphics.fillStyle(0x000000, 0.15);
+        this.buildingGraphics.fillRect(px + 3, py + 3, pw, ph);
+        this.buildingGraphics.fillStyle(color, 0.4);
+        this.buildingGraphics.fillRect(px, py, pw, ph);
+        this.buildingGraphics.lineStyle(1, 0x444444, 0.5);
+        this.buildingGraphics.strokeRect(px, py, pw, ph);
+        const barH = 4;
+        this.buildingGraphics.fillStyle(0x000000, 0.6);
+        this.buildingGraphics.fillRect(px, py + ph - barH, pw, barH);
+        this.buildingGraphics.fillStyle(0x00ff00, 0.8);
+        this.buildingGraphics.fillRect(px, py + ph - barH, pw * Math.min(progress, 1), barH);
+        continue;
+      }
+
       this.buildingGraphics.fillStyle(0x000000, 0.2);
       this.buildingGraphics.fillRect(px + 3, py + 3, pw, ph);
 
@@ -973,9 +990,9 @@ class GameScene extends Phaser.Scene {
     this.commandPanelButtons = [];
 
     this.commandPanelContainer.visible = true;
-    this.commandPanelTitle.setText(BUILDING_DEFS[building.type]?.label || building.type);
+    this.commandPanelTitle.setText((BUILDING_DEFS[building.type]?.label || building.type) + (building.constructed ? '' : ' (building)'));
 
-    if (building.type === 'town_center') {
+    if (building.constructed && building.type === 'town_center') {
       this.addCommandButton('Train Villager', VILLAGER_COST, () => this.trainVillager(building));
     }
   }
@@ -1293,6 +1310,8 @@ class GameScene extends Phaser.Scene {
       worldX: buildX * SCALE.BUILD_CELL_SIZE,
       worldY: buildY * SCALE.BUILD_CELL_SIZE,
       hp: def.hp,
+      constructionTimer: def.buildTimeMs || 0,
+      constructed: (def.buildTimeMs || 0) <= 0,
     };
 
     for (let dx = 0; dx < def.w; dx++) {
@@ -1311,15 +1330,12 @@ class GameScene extends Phaser.Scene {
     this.buildings.push(building);
     this.renderBuildings();
 
-    if (type === 'town_center') {
+    if (type === 'town_center' && building.constructed) {
       this.populationCap += POPULATION.BASE_CAP;
       this.spawnStartingVillagers(building);
     }
-    if (type === 'house') {
-      this.populationCap += POPULATION.PER_HOUSE;
-    }
 
-    console.log(`BUILD PLACED: ${type} at build (${buildX}, ${buildY}) px (${building.worldX}, ${building.worldY})`);
+    console.log(`BUILD PLACED: ${type} at build (${buildX}, ${buildY}) px (${building.worldX}, ${building.worldY}) constructed:${building.constructed}`);
     return building;
   }
 
@@ -1519,10 +1535,31 @@ class GameScene extends Phaser.Scene {
     if (this.farmTickTimer >= FARM_TICK_INTERVAL_MS) {
       this.farmTickTimer -= FARM_TICK_INTERVAL_MS;
       for (const b of this.buildings) {
-        if (b.type === 'farm' && b.ownerId === this.playerId) {
+        if (b.constructed && b.type === 'farm' && b.ownerId === this.playerId) {
           this.playerResources.food += FOOD_PER_FARM_TICK;
         }
       }
+    }
+
+    let buildingUpdated = false;
+    for (const b of this.buildings) {
+      if (b.constructed) continue;
+      b.constructionTimer -= delta;
+      if (b.constructionTimer <= 0) {
+        b.constructionTimer = 0;
+        b.constructed = true;
+        if (b.type === 'house') {
+          this.populationCap += POPULATION.PER_HOUSE;
+        }
+        if (b.type === 'town_center') {
+          this.populationCap += POPULATION.BASE_CAP;
+          this.spawnStartingVillagers(b);
+        }
+        buildingUpdated = true;
+      }
+    }
+    if (buildingUpdated) {
+      this.renderBuildings();
     }
 
     if (this.placementMode) {

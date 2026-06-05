@@ -9,12 +9,12 @@ const SCALE = {
 };
 
 const BUILDING_DEFS = {
-  town_center: { label: 'Town Center', hotkey: 'T', w: 12, h: 12, color: 0xc49a5a, hp: 1500, cost: {} },
-  house: { label: 'House', hotkey: 'H', w: 5, h: 5, color: 0xd2b48c, hp: 300, cost: { wood: 25 } },
-  lumber_camp: { label: 'Lumber Camp', hotkey: 'L', w: 7, h: 7, color: 0x8b5a2b, hp: 500, cost: { wood: 50 } },
-  mining_camp: { label: 'Mining Camp', hotkey: 'M', w: 7, h: 7, color: 0x777777, hp: 500, cost: { wood: 50 } },
-  barracks: { label: 'Barracks', hotkey: 'B', w: 12, h: 10, color: 0x9a6a3a, hp: 900, cost: { wood: 150 } },
-  farm: { label: 'Farm', hotkey: 'G', w: 12, h: 12, color: 0xb5a642, hp: 200, cost: { wood: 60 } },
+  town_center: { label: 'Town Center', hotkey: 'T', w: 12, h: 12, color: 0xc49a5a, hp: 1500, cost: {}, buildTimeMs: 0 },
+  house: { label: 'House', hotkey: 'H', w: 5, h: 5, color: 0xd2b48c, hp: 300, cost: { wood: 25 }, buildTimeMs: 5000 },
+  lumber_camp: { label: 'Lumber Camp', hotkey: 'L', w: 7, h: 7, color: 0x8b5a2b, hp: 500, cost: { wood: 50 }, buildTimeMs: 5000 },
+  mining_camp: { label: 'Mining Camp', hotkey: 'M', w: 7, h: 7, color: 0x777777, hp: 500, cost: { wood: 50 }, buildTimeMs: 5000 },
+  barracks: { label: 'Barracks', hotkey: 'B', w: 12, h: 10, color: 0x9a6a3a, hp: 900, cost: { wood: 150 }, buildTimeMs: 10000 },
+  farm: { label: 'Farm', hotkey: 'G', w: 12, h: 12, color: 0xb5a642, hp: 200, cost: { wood: 60 }, buildTimeMs: 8000 },
 };
 
 const TERRAIN_COLORS = {
