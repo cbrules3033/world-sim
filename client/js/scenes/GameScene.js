@@ -92,7 +92,7 @@ class GameScene extends Phaser.Scene {
   }
 
   blockBuildCellsForEntity(entity) {
-    this.buildings.blockBuildCellsForEntity(entity);
+    this.buildingSys.blockBuildCellsForEntity(entity);
   }
 
   worldPxToBuildCell(x, y) {
@@ -159,19 +159,19 @@ class GameScene extends Phaser.Scene {
   }
 
   clearUnitWork(unit) {
-    this.units.clearUnitWork(unit);
+    this.unitSys.clearUnitWork(unit);
   }
 
   canAffordCost(cost = {}) {
-    return this.buildings.canAffordCost(cost);
+    return this.buildingSys.canAffordCost(cost);
   }
 
   spendCost(cost = {}) {
-    return this.buildings.spendCost(cost);
+    return this.buildingSys.spendCost(cost);
   }
 
   formatCost(cost = {}) {
-    return this.buildings.formatCost(cost);
+    return this.buildingSys.formatCost(cost);
   }
 
   sendUnitToDropoff(unit) {
@@ -223,8 +223,8 @@ class GameScene extends Phaser.Scene {
 
     this.pathfinding = new PathfindingSystem(this);
     this.resources = new ResourceSystem(this);
-    this.buildings = new BuildingSystem(this);
-    this.units = new UnitSystem(this);
+    this.buildingSys = new BuildingSystem(this);
+    this.unitSys = new UnitSystem(this);
     this.ui = new UISystem(this);
 
     this.worldObjects = (this.worldObjects || []).concat([
@@ -427,7 +427,7 @@ class GameScene extends Phaser.Scene {
   }
 
   renderUnits() {
-    this.units.renderUnits();
+    this.unitSys.renderUnits();
   }
 
   setupCameras() {
@@ -976,19 +976,19 @@ class GameScene extends Phaser.Scene {
   }
 
   getBuildingAtPointer(pointer) {
-    return this.buildings.getBuildingAtPointer(pointer);
+    return this.buildingSys.getBuildingAtPointer(pointer);
   }
 
   selectBuilding(building) {
-    this.buildings.selectBuilding(building);
+    this.buildingSys.selectBuilding(building);
   }
 
   deselectBuilding() {
-    this.buildings.deselectBuilding();
+    this.buildingSys.deselectBuilding();
   }
 
   trainVillager(building) {
-    this.buildings.trainVillager(building);
+    this.buildingSys.trainVillager(building);
   }
 
   pointInRect(px, py, x, y, w, h) {
@@ -1014,7 +1014,7 @@ class GameScene extends Phaser.Scene {
   }
 
   getUnitAtPointer(pointer = this.input.activePointer) {
-    return this.units.getUnitAtPointer(pointer);
+    return this.unitSys.getUnitAtPointer(pointer);
   }
 
   onPointerDown(pointer) {
@@ -1115,23 +1115,23 @@ class GameScene extends Phaser.Scene {
   }
 
   clearUnitSelection() {
-    this.units.clearUnitSelection();
+    this.unitSys.clearUnitSelection();
   }
 
   placeBuilding(type, buildX, buildY) {
-    return this.buildings.placeBuilding(type, buildX, buildY);
+    return this.buildingSys.placeBuilding(type, buildX, buildY);
   }
 
   spawnStartingVillagers(tc) {
-    this.buildings.spawnStartingVillagers(tc);
+    this.buildingSys.spawnStartingVillagers(tc);
   }
 
   startBuildingPlacement(type) {
-    this.buildings.startBuildingPlacement(type);
+    this.buildingSys.startBuildingPlacement(type);
   }
 
   cancelBuildingPlacement() {
-    this.buildings.cancelBuildingPlacement();
+    this.buildingSys.cancelBuildingPlacement();
   }
 
   jumpToFirstSite(siteType) {
@@ -1157,28 +1157,28 @@ class GameScene extends Phaser.Scene {
   }
 
   isBuildable(buildX, buildY, fw, fh) {
-    return this.buildings.isBuildable(buildX, buildY, fw, fh);
+    return this.buildingSys.isBuildable(buildX, buildY, fw, fh);
   }
 
   getPlacementStatusText() {
-    return this.buildings.getPlacementStatusText();
+    return this.buildingSys.getPlacementStatusText();
   }
 
   renderSelectedBuilding() {
-    this.buildings.renderSelectedBuilding();
+    this.buildingSys.renderSelectedBuilding();
   }
 
   renderBuildingGhost() {
-    this.buildings.renderBuildingGhost();
+    this.buildingSys.renderBuildingGhost();
   }
 
   updateUnits(delta) {
-    this.units.updateUnits(delta);
+    this.unitSys.updateUnits(delta);
   }
 
   update(time, delta) {
     this.updateUnits(delta);
-    this.buildings.update(delta);
+    this.buildingSys.update(delta);
     this.ui.update();
 
     if (!this.debugText) return;
