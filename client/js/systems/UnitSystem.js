@@ -20,6 +20,8 @@ class UnitSystem {
     unit.gatherTimer = 0;
     unit.buildTargetId = null;
     unit.buildTimer = 0;
+    unit.buildTargetX = null;
+    unit.buildTargetY = null;
   }
 
   stopUnit(unit) {
@@ -30,6 +32,8 @@ class UnitSystem {
     unit.targetY = unit.y;
     unit.stuckTimer = 0;
     unit.lastProgressDist = Infinity;
+    unit.buildTargetX = null;
+    unit.buildTargetY = null;
   }
 
   getUnitAtPointer(pointer = this.scene.input.activePointer) {

@@ -265,6 +265,8 @@ class BuildingSystem {
         gatherTimer: 0,
         buildTargetId: null,
         buildTimer: 0,
+        buildTargetX: null,
+        buildTargetY: null,
         jobRetryTimer: 0,
       });
     }
@@ -364,6 +366,8 @@ class BuildingSystem {
       gatherTimer: 0,
         buildTargetId: null,
         buildTimer: 0,
+        buildTargetX: null,
+        buildTargetY: null,
         jobRetryTimer: 0,
       };
 
@@ -392,6 +396,21 @@ class BuildingSystem {
       x: building.worldX + (building.footprintW * SCALE.BUILD_CELL_SIZE) / 2,
       y: building.worldY + (building.footprintH * SCALE.BUILD_CELL_SIZE) / 2,
     };
+  }
+
+  getDistanceToBuildingFootprint(unit, building) {
+    const minX = building.worldX;
+    const minY = building.worldY;
+    const maxX = building.worldX + building.footprintW * SCALE.BUILD_CELL_SIZE;
+    const maxY = building.worldY + building.footprintH * SCALE.BUILD_CELL_SIZE;
+
+    const closestX = Phaser.Math.Clamp(unit.x, minX, maxX);
+    const closestY = Phaser.Math.Clamp(unit.y, minY, maxY);
+
+    const dx = unit.x - closestX;
+    const dy = unit.y - closestY;
+
+    return Math.sqrt(dx * dx + dy * dy);
   }
 
   isCandidateCrowded(x, y, ignoreUnitId = null) {
@@ -435,17 +454,11 @@ class BuildingSystem {
     const refY = unit ? unit.y : building.worldY;
     let best = null;
     let bestDist = Infinity;
+    let fallback = null;
+    let fallbackDist = Infinity;
 
     for (const c of candidates) {
       if (!scene.isCellPathable(c.x, c.y)) continue;
-
-      if (unit && this.isCandidateCrowded(
-        c.x * SCALE.BUILD_CELL_SIZE + SCALE.BUILD_CELL_SIZE / 2,
-        c.y * SCALE.BUILD_CELL_SIZE + SCALE.BUILD_CELL_SIZE / 2,
-        unit.id
-      )) {
-        continue;
-      }
 
       const wp = scene.buildCellToWorldPx(c.x, c.y);
 
@@ -453,13 +466,22 @@ class BuildingSystem {
       const dy = wp.y - refY;
       const d = dx * dx + dy * dy;
 
+      if (d < fallbackDist) {
+        fallbackDist = d;
+        fallback = wp;
+      }
+
+      if (unit && this.isCandidateCrowded(wp.x, wp.y, unit.id)) {
+        continue;
+      }
+
       if (d < bestDist) {
         bestDist = d;
         best = wp;
       }
     }
 
-    return best;
+    return best || fallback;
   }
 
   assignBuilderToBuilding(unit, building) {
@@ -490,6 +512,9 @@ class BuildingSystem {
       return false;
     }
 
+    unit.buildTargetX = buildPoint.x;
+    unit.buildTargetY = buildPoint.y;
+
     scene.commandMoveUnit(unit, buildPoint.x, buildPoint.y, { stopOnFail: false });
 
     return true;
@@ -507,6 +532,8 @@ class BuildingSystem {
       unit.workState = 'idle';
       unit.buildTargetId = null;
       unit.buildTimer = 0;
+      unit.buildTargetX = null;
+      unit.buildTargetY = null;
       unit.state = 'idle';
       unit.path = [];
       unit.pathIndex = 0;
@@ -531,6 +558,8 @@ class BuildingSystem {
     if (!best) {
       unit.workState = 'idle';
       unit.buildTargetId = null;
+      unit.buildTargetX = null;
+      unit.buildTargetY = null;
       return false;
     }
 
@@ -575,6 +604,8 @@ class BuildingSystem {
     for (const builder of builders) {
       builder.buildTargetId = null;
       builder.buildTimer = 0;
+      builder.buildTargetX = null;
+      builder.buildTargetY = null;
       this.assignBuilderToNextNearestFoundation(builder);
     }
   }
@@ -634,25 +665,57 @@ class BuildingSystem {
       return;
     }
 
-    const center = this.getBuildingCenter(building);
-    const dx = unit.x - center.x;
-    const dy = unit.y - center.y;
-    const dist = Math.sqrt(dx * dx + dy * dy);
+    const distToFootprint = this.getDistanceToBuildingFootprint(unit, building);
 
-    const buildRange = Math.max(
-      building.footprintW,
-      building.footprintH
-    ) * SCALE.BUILD_CELL_SIZE / 2 + 14;
+    const distToAssignedPoint = (
+      unit.buildTargetX != null &&
+      unit.buildTargetY != null
+    )
+      ? Math.sqrt(
+          (unit.x - unit.buildTargetX) * (unit.x - unit.buildTargetX) +
+          (unit.y - unit.buildTargetY) * (unit.y - unit.buildTargetY)
+        )
+      : Infinity;
+
+    const buildRange = UNIT_COLLISION.SEPARATION_RADIUS + 6;
+    const arrivedAtBuildPoint = distToAssignedPoint <= 8;
+    const closeToFootprint = distToFootprint <= buildRange;
 
     if (unit.workState === 'moving_to_build') {
-      if (dist <= buildRange) {
+      if (arrivedAtBuildPoint || closeToFootprint) {
         unit.state = 'idle';
         unit.path = [];
         unit.pathIndex = 0;
         unit.workState = 'building';
         unit.buildTimer = 0;
         unit.jobRetryTimer = 0;
-      } else if (unit.state === 'idle') {
+
+        if (!building.assignedBuilderIds.includes(unit.id)) {
+          building.assignedBuilderIds.push(unit.id);
+        }
+
+        if (scene.verboseLogs) {
+          console.log('Builder started construction:', {
+            unit: unit.id,
+            building: building.id,
+            distToFootprint,
+            distToAssignedPoint,
+            arrivedAtBuildPoint,
+            closeToFootprint,
+          });
+        }
+
+        return;
+      }
+
+      if (unit.state === 'idle') {
+        if (closeToFootprint) {
+          unit.workState = 'building';
+          unit.buildTimer = 0;
+          unit.jobRetryTimer = 0;
+          return;
+        }
+
         unit.jobRetryTimer = (unit.jobRetryTimer || 0) + delta;
 
         if (unit.jobRetryTimer > 800) {
@@ -661,6 +724,8 @@ class BuildingSystem {
           if (building && !building.constructed) {
             const buildPoint = this.getBuildPointNearBuilding(building, unit);
             if (buildPoint) {
+              unit.buildTargetX = buildPoint.x;
+              unit.buildTargetY = buildPoint.y;
               scene.commandMoveUnit(unit, buildPoint.x, buildPoint.y, { stopOnFail: false });
             }
           }
