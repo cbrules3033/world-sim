@@ -23,6 +23,7 @@ class GameScene extends Phaser.Scene {
       stone: 0,
       copper: 0,
       iron: 0,
+      food: 0,
     };
 
     if (!Array.isArray(data.resourceEntities)) {
@@ -40,6 +41,7 @@ class GameScene extends Phaser.Scene {
 
     this.populationCap = 0;
     this.selectedBuilding = null;
+    this.farmTickTimer = 0;
 
     this.buildGridWidth = this.width * SCALE.BUILD_CELLS_PER_TILE;
     this.buildGridHeight = this.height * SCALE.BUILD_CELLS_PER_TILE;
@@ -929,7 +931,7 @@ class GameScene extends Phaser.Scene {
     if (!this.resourceHudText) return;
     this.populationUsed = this.units.filter(u => u.ownerId === this.playerId).length;
     this.resourceHudText.setText(
-      `Pop: ${this.populationUsed}/${this.populationCap}  |  Wood: ${this.playerResources.wood}  Stone: ${this.playerResources.stone}  Copper: ${this.playerResources.copper}  Iron: ${this.playerResources.iron}`
+      `Pop: ${this.populationUsed}/${this.populationCap}  |  Food: ${this.playerResources.food}  Wood: ${this.playerResources.wood}  Stone: ${this.playerResources.stone}  Copper: ${this.playerResources.copper}  Iron: ${this.playerResources.iron}`
     );
   }
 
@@ -1513,6 +1515,16 @@ class GameScene extends Phaser.Scene {
     this.updateUnits(delta);
     this.updateResourceHud();
 
+    this.farmTickTimer += delta;
+    if (this.farmTickTimer >= FARM_TICK_INTERVAL_MS) {
+      this.farmTickTimer -= FARM_TICK_INTERVAL_MS;
+      for (const b of this.buildings) {
+        if (b.type === 'farm' && b.ownerId === this.playerId) {
+          this.playerResources.food += FOOD_PER_FARM_TICK;
+        }
+      }
+    }
+
     if (this.placementMode) {
       const landValid = this.isBuildable(this.ghostBuildX, this.ghostBuildY, this.placementMode.w, this.placementMode.h);
       const canAfford = this.canAffordCost(this.placementMode.cost || {});
@@ -1579,7 +1591,7 @@ class GameScene extends Phaser.Scene {
       `Ore: ${this.stats.oreDepositCount} deposits`,
       `Spawns: ${this.stats.validSpawns}`,
       ``,
-      `Resources: W:${this.playerResources.wood} S:${this.playerResources.stone} C:${this.playerResources.copper} I:${this.playerResources.iron}`,
+      `Resources: F:${this.playerResources.food} W:${this.playerResources.wood} S:${this.playerResources.stone} C:${this.playerResources.copper} I:${this.playerResources.iron}`,
       `Buildings: ${this.buildings.length}  Units: ${this.units.length}`,
       tileInfo,
       entityInfo,

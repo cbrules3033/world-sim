@@ -74,8 +74,11 @@ const POPULATION = {
 };
 
 const VILLAGER_COST = {
-  wood: 50,
+  food: 50,
 };
+
+const FOOD_PER_FARM_TICK = 2;
+const FARM_TICK_INTERVAL_MS = 3000;
 
 const UI_STYLE = {
   panelBg: 0x000000,
