@@ -467,7 +467,10 @@ class GameScene extends Phaser.Scene {
       const color = BUILDING_DEFS[b.type]?.color || 0xb08a55;
 
       if (!b.constructed) {
-        const progress = b.constructionTimer > 0 ? 1 - b.constructionTimer / (BUILDING_DEFS[b.type]?.buildTimeMs || 1) : 0;
+        const progress = b.constructionRequiredMs > 0
+          ? b.constructionProgressMs / b.constructionRequiredMs
+          : 1;
+        const clampedProgress = Phaser.Math.Clamp(progress, 0, 1);
         this.buildingGraphics.fillStyle(0x000000, 0.15);
         this.buildingGraphics.fillRect(px + 3, py + 3, pw, ph);
         this.buildingGraphics.fillStyle(color, 0.4);
@@ -478,7 +481,7 @@ class GameScene extends Phaser.Scene {
         this.buildingGraphics.fillStyle(0x000000, 0.6);
         this.buildingGraphics.fillRect(px, py + ph - barH, pw, barH);
         this.buildingGraphics.fillStyle(0x00ff00, 0.8);
-        this.buildingGraphics.fillRect(px, py + ph - barH, pw * Math.min(progress, 1), barH);
+        this.buildingGraphics.fillRect(px, py + ph - barH, pw * clampedProgress, barH);
         continue;
       }
 
@@ -597,6 +600,10 @@ class GameScene extends Phaser.Scene {
     this.buildingSystem.trainVillager(building);
   }
 
+  assignBuilderToBuilding(unit, building) {
+    return this.buildingSystem.assignBuilderToBuilding(unit, building);
+  }
+
   getEntityAtPointer(pointer = this.input.activePointer) {
     const wp = this.getPointerWorldPx(pointer);
     let closest = null;
@@ -645,7 +652,22 @@ class GameScene extends Phaser.Scene {
           return;
         }
 
-        this.placeBuilding(this.placementMode.type, this.ghostBuildX, this.ghostBuildY);
+        const placed = this.placeBuilding(this.placementMode.type, this.ghostBuildX, this.ghostBuildY);
+
+        if (placed && !placed.constructed && this.selectedUnits.length > 0) {
+          let assigned = 0;
+          for (const unit of this.selectedUnits) {
+            if (unit.type === 'villager') {
+              if (this.assignBuilderToBuilding(unit, placed)) {
+                assigned++;
+              }
+            }
+          }
+          if (assigned > 0) {
+            this.addGameMessage(`${assigned} builder${assigned === 1 ? '' : 's'} assigned`, UI_STYLE.textGood);
+          }
+        }
+
         this.cancelBuildingPlacement();
         return;
       }
@@ -742,6 +764,29 @@ class GameScene extends Phaser.Scene {
         this.renderUnits();
         this.renderPaths();
         return;
+      }
+
+      const clickedBuilding = this.getBuildingAtPointer(pointer);
+
+      if (
+        this.selectedUnits.length > 0 &&
+        clickedBuilding &&
+        !clickedBuilding.constructed
+      ) {
+        let assigned = 0;
+        for (const unit of this.selectedUnits) {
+          if (unit.type === 'villager') {
+            if (this.assignBuilderToBuilding(unit, clickedBuilding)) {
+              assigned++;
+            }
+          }
+        }
+        if (assigned > 0) {
+          this.addGameMessage(`${assigned} builder${assigned === 1 ? '' : 's'} assigned`, UI_STYLE.textGood);
+          this.renderUnits();
+          this.renderPaths();
+          return;
+        }
       }
 
       if (this.selectedUnits.length > 0) {

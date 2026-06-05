@@ -160,6 +160,8 @@ class BuildingSystem {
   placeBuilding(type, buildX, buildY) {
     const scene = this.scene;
     const def = BUILDING_DEFS[type];
+    const buildTime = def.buildTimeMs || 0;
+
     const building = {
       id: `building_${scene.nextBuildingId++}`,
       ownerId: scene.playerId,
@@ -169,8 +171,10 @@ class BuildingSystem {
       worldX: buildX * SCALE.BUILD_CELL_SIZE,
       worldY: buildY * SCALE.BUILD_CELL_SIZE,
       hp: def.hp,
-      constructionTimer: def.buildTimeMs || 0,
-      constructed: (def.buildTimeMs || 0) <= 0,
+      constructionRequiredMs: buildTime,
+      constructionProgressMs: buildTime <= 0 ? buildTime : 0,
+      constructed: buildTime <= 0,
+      assignedBuilderIds: [],
     };
 
     for (let dx = 0; dx < def.w; dx++) {
@@ -259,6 +263,8 @@ class BuildingSystem {
         gatherResourceType: null,
         dropoffTargetId: null,
         gatherTimer: 0,
+        buildTargetId: null,
+        buildTimer: 0,
       });
     }
 
@@ -355,6 +361,8 @@ class BuildingSystem {
       gatherResourceType: null,
       dropoffTargetId: null,
       gatherTimer: 0,
+      buildTargetId: null,
+      buildTimer: 0,
     };
 
     scene.units.push(villager);
@@ -366,6 +374,258 @@ class BuildingSystem {
     if (scene.uiSystem) scene.uiSystem.lastActionPanelKey = null;
     scene.uiSystem?.updateActionPanel();
     if (scene.verboseLogs) console.log('Villager trained at:', building.id, { x: px, y: py });
+  }
+
+  // --- foundation / builder helpers ---
+
+  getUnfinishedBuildings() {
+    return this.scene.buildings.filter(b =>
+      b.ownerId === this.scene.playerId &&
+      !b.constructed
+    );
+  }
+
+  getBuildingCenter(building) {
+    return {
+      x: building.worldX + (building.footprintW * SCALE.BUILD_CELL_SIZE) / 2,
+      y: building.worldY + (building.footprintH * SCALE.BUILD_CELL_SIZE) / 2,
+    };
+  }
+
+  getBuildPointNearBuilding(building) {
+    const scene = this.scene;
+
+    const minX = building.buildX;
+    const minY = building.buildY;
+    const maxX = building.buildX + building.footprintW - 1;
+    const maxY = building.buildY + building.footprintH - 1;
+
+    const candidates = [];
+
+    for (let x = minX - 1; x <= maxX + 1; x++) {
+      candidates.push({ x, y: minY - 1 });
+      candidates.push({ x, y: maxY + 1 });
+    }
+
+    for (let y = minY; y <= maxY; y++) {
+      candidates.push({ x: minX - 1, y });
+      candidates.push({ x: maxX + 1, y });
+    }
+
+    const unit = scene.selectedUnits?.[0];
+    let best = null;
+    let bestDist = Infinity;
+
+    for (const c of candidates) {
+      if (!scene.isCellPathable(c.x, c.y)) continue;
+
+      const wp = scene.buildCellToWorldPx(c.x, c.y);
+
+      const refX = unit ? unit.x : building.worldX;
+      const refY = unit ? unit.y : building.worldY;
+      const dx = wp.x - refX;
+      const dy = wp.y - refY;
+      const d = dx * dx + dy * dy;
+
+      if (d < bestDist) {
+        bestDist = d;
+        best = wp;
+      }
+    }
+
+    return best;
+  }
+
+  assignBuilderToBuilding(unit, building) {
+    const scene = this.scene;
+
+    if (!unit || unit.type !== 'villager') return false;
+    if (!building || building.constructed) return false;
+
+    scene.clearUnitWork(unit);
+
+    if (!building.assignedBuilderIds) {
+      building.assignedBuilderIds = [];
+    }
+
+    if (!building.assignedBuilderIds.includes(unit.id)) {
+      building.assignedBuilderIds.push(unit.id);
+    }
+
+    unit.workState = 'moving_to_build';
+    unit.buildTargetId = building.id;
+    unit.buildTimer = 0;
+
+    const buildPoint = this.getBuildPointNearBuilding(building);
+
+    if (!buildPoint) {
+      scene.addGameMessage('No build position available', UI_STYLE.textWarn);
+      return false;
+    }
+
+    scene.commandMoveUnit(unit, buildPoint.x, buildPoint.y);
+
+    return true;
+  }
+
+  assignBuilderToNextNearestFoundation(unit) {
+    const scene = this.scene;
+
+    if (!unit || unit.type !== 'villager') return false;
+
+    const unfinished = this.getUnfinishedBuildings()
+      .filter(b => !b.assignedBuilderIds?.includes(unit.id));
+
+    if (unfinished.length === 0) {
+      unit.workState = 'idle';
+      unit.buildTargetId = null;
+      unit.buildTimer = 0;
+      unit.state = 'idle';
+      unit.path = [];
+      unit.pathIndex = 0;
+      return false;
+    }
+
+    let best = null;
+    let bestDist = Infinity;
+
+    for (const building of unfinished) {
+      const center = this.getBuildingCenter(building);
+      const dx = center.x - unit.x;
+      const dy = center.y - unit.y;
+      const d = dx * dx + dy * dy;
+
+      if (d < bestDist) {
+        best = building;
+        bestDist = d;
+      }
+    }
+
+    if (!best) {
+      unit.workState = 'idle';
+      unit.buildTargetId = null;
+      return false;
+    }
+
+    return this.assignBuilderToBuilding(unit, best);
+  }
+
+  completeBuilding(building) {
+    const scene = this.scene;
+
+    if (building.constructed) return;
+
+    building.constructed = true;
+    building.assignedBuilderIds = building.assignedBuilderIds || [];
+
+    if (building.type === 'house') {
+      scene.populationCap += POPULATION.PER_HOUSE;
+      scene.refreshPopulationUsed();
+      scene.updateResourceHud();
+    }
+
+    if (building.type === 'town_center') {
+      scene.populationCap += POPULATION.BASE_CAP;
+      this.spawnStartingVillagers(building);
+      scene.refreshPopulationUsed();
+      scene.updateResourceHud();
+    }
+
+    const def = BUILDING_DEFS[building.type];
+    const label = def?.label || building.type;
+
+    scene.showFloatingMessage(`${label} complete`, scene.scale.width / 2, 92, UI_STYLE.textGood);
+    scene.addGameMessage(`${label} complete`, UI_STYLE.textGood);
+
+    const builders = building.assignedBuilderIds
+      .map(id => scene.units.find(u => u.id === id))
+      .filter(Boolean);
+
+    building.assignedBuilderIds = [];
+
+    scene.renderBuildings();
+
+    for (const builder of builders) {
+      builder.buildTargetId = null;
+      builder.buildTimer = 0;
+      this.assignBuilderToNextNearestFoundation(builder);
+    }
+  }
+
+  updateConstruction(delta) {
+    const scene = this.scene;
+    let buildingUpdated = false;
+
+    for (const building of scene.buildings) {
+      if (building.constructed) continue;
+
+      const builderIds = building.assignedBuilderIds || [];
+      const activeBuilders = [];
+
+      for (const id of builderIds) {
+        const unit = scene.units.find(u => u.id === id);
+        if (!unit) continue;
+        if (unit.workState !== 'building') continue;
+        if (unit.buildTargetId !== building.id) continue;
+
+        activeBuilders.push(unit);
+      }
+
+      if (activeBuilders.length === 0) continue;
+
+      const buildRate = 1;
+      building.constructionProgressMs += delta * buildRate * activeBuilders.length;
+
+      if (building.constructionProgressMs >= building.constructionRequiredMs) {
+        building.constructionProgressMs = building.constructionRequiredMs;
+        this.completeBuilding(building);
+      }
+
+      buildingUpdated = true;
+    }
+
+    if (buildingUpdated) {
+      scene.renderBuildings();
+      scene.renderSelectedBuilding();
+    }
+  }
+
+  updateBuilderWork(unit, delta) {
+    const scene = this.scene;
+
+    if (
+      unit.workState !== 'moving_to_build' &&
+      unit.workState !== 'building'
+    ) {
+      return;
+    }
+
+    const building = scene.getBuildingById(unit.buildTargetId);
+
+    if (!building || building.constructed) {
+      this.assignBuilderToNextNearestFoundation(unit);
+      return;
+    }
+
+    const center = this.getBuildingCenter(building);
+    const dx = unit.x - center.x;
+    const dy = unit.y - center.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+
+    const buildRange = Math.max(
+      building.footprintW,
+      building.footprintH
+    ) * SCALE.BUILD_CELL_SIZE / 2 + 14;
+
+    if (unit.workState === 'moving_to_build') {
+      if (dist <= buildRange || unit.state === 'idle') {
+        unit.state = 'idle';
+        unit.path = [];
+        unit.pathIndex = 0;
+        unit.workState = 'building';
+        unit.buildTimer = 0;
+      }
+    }
   }
 
   update(delta) {
@@ -391,31 +651,7 @@ class BuildingSystem {
       }
     }
 
-    let buildingUpdated = false;
-    for (const b of scene.buildings) {
-      if (b.constructed) continue;
-      b.constructionTimer -= delta;
-      if (b.constructionTimer <= 0) {
-        b.constructionTimer = 0;
-        b.constructed = true;
-        if (b.type === 'house') {
-          scene.populationCap += POPULATION.PER_HOUSE;
-        }
-        if (b.type === 'town_center') {
-          scene.populationCap += POPULATION.BASE_CAP;
-          this.spawnStartingVillagers(b);
-        }
-        buildingUpdated = true;
-        const def = BUILDING_DEFS[b.type];
-        if (def) {
-          scene.showFloatingMessage(`${def.label} complete`, scene.scale.width / 2, 92, UI_STYLE.textGood);
-          scene.addGameMessage(`${def.label} complete`, UI_STYLE.textGood);
-        }
-      }
-    }
-    if (buildingUpdated) {
-      scene.renderBuildings();
-    }
+    this.updateConstruction(delta);
 
     if (scene.placementMode) {
       const landValid = this.isBuildable(scene.ghostBuildX, scene.ghostBuildY, scene.placementMode.w, scene.placementMode.h);

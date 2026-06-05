@@ -3,12 +3,23 @@ class UnitSystem {
     this.scene = scene;
   }
 
+  removeBuilderFromBuildings(unit) {
+    const scene = this.scene;
+    for (const building of scene.buildings) {
+      if (!building.assignedBuilderIds) continue;
+      building.assignedBuilderIds = building.assignedBuilderIds.filter(id => id !== unit.id);
+    }
+  }
+
   clearUnitWork(unit) {
+    this.removeBuilderFromBuildings(unit);
     unit.workState = 'idle';
     unit.gatherTargetId = null;
     unit.gatherResourceType = null;
     unit.dropoffTargetId = null;
     unit.gatherTimer = 0;
+    unit.buildTargetId = null;
+    unit.buildTimer = 0;
   }
 
   stopUnit(unit) {
@@ -107,7 +118,9 @@ class UnitSystem {
       if (
         u.workState === 'gathering' ||
         u.workState === 'moving_to_resource' ||
-        u.workState === 'moving_to_dropoff'
+        u.workState === 'moving_to_dropoff' ||
+        u.workState === 'building' ||
+        u.workState === 'moving_to_build'
       ) {
         return false;
       }
@@ -360,6 +373,7 @@ class UnitSystem {
 
     for (const u of scene.units) {
       scene.updateVillagerWork(u, delta);
+      scene.buildingSystem?.updateBuilderWork(u, delta);
     }
 
     const separated = this.applyUnitSeparation();

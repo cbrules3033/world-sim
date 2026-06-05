@@ -147,6 +147,14 @@ class UISystem {
       return `Returning ${unit.carryResource || 'resources'}`;
     }
 
+    if (unit.workState === 'moving_to_build') {
+      return 'Going to build';
+    }
+
+    if (unit.workState === 'building') {
+      return 'Constructing';
+    }
+
     return unit.workState;
   }
 
@@ -156,14 +164,16 @@ class UISystem {
     const scene = this.scene;
 
     if (!building.constructed) {
-      const total = def.buildTimeMs || 1;
-      const progress = Phaser.Math.Clamp(
-        Math.floor((1 - building.constructionTimer / total) * 100),
-        0, 100
-      );
+      const progress = building.constructionRequiredMs > 0
+        ? Phaser.Math.Clamp(
+            Math.floor((building.constructionProgressMs / building.constructionRequiredMs) * 100),
+            0, 100
+          )
+        : 100;
 
-      lines.push('State: Building...');
+      lines.push('State: Foundation');
       lines.push(`Progress: ${progress}%`);
+      lines.push(`Builders: ${building.assignedBuilderIds?.length || 0}`);
     } else {
       lines.push('State: Active');
     }
@@ -453,6 +463,8 @@ class UISystem {
       const canAfford = scene.canAffordCost(VILLAGER_COST);
       const hasPop = scene.populationUsed < scene.populationCap;
       key = `train_${canAfford}_${hasPop}`;
+    } else if (scene.selectedBuilding && !scene.selectedBuilding.constructed) {
+      key = `foundation_${scene.selectedBuilding.type}`;
     } else if (scene.selectedBuilding) {
       key = `building_${scene.selectedBuilding.type}`;
     }
@@ -482,6 +494,11 @@ class UISystem {
         scene.uiSystem?.updateActionPanel();
       });
 
+      return;
+    }
+
+    if (scene.selectedBuilding && !scene.selectedBuilding.constructed) {
+      this.createActionButton('Foundation - needs builders', 12, 34, false, () => {});
       return;
     }
 
