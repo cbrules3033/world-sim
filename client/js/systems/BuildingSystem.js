@@ -43,9 +43,9 @@ class BuildingSystem {
       this.scene.playerResources[resource] -= amount;
     }
     this.scene.updateResourceHud();
-    if (this.scene.ui) this.scene.ui.lastActionPanelKey = null;
-    this.scene.ui?.updateActionPanel();
-    this.scene.ui?.updateCommandPanel();
+    if (this.scene.uiSystem) this.scene.uiSystem.lastActionPanelKey = null;
+    this.scene.uiSystem?.updateActionPanel();
+    this.scene.uiSystem?.updateCommandPanel();
     return true;
   }
 
@@ -354,8 +354,8 @@ class BuildingSystem {
     scene.renderUnits();
     scene.showFloatingMessage('Villager trained!', scene.scale.width / 2, 58, UI_STYLE.textGood);
     scene.addGameMessage('Villager trained', UI_STYLE.textGood);
-    if (scene.ui) scene.ui.lastActionPanelKey = null;
-    scene.ui?.updateActionPanel();
+    if (scene.uiSystem) scene.uiSystem.lastActionPanelKey = null;
+    scene.uiSystem?.updateActionPanel();
     if (scene.verboseLogs) console.log('Villager trained at:', building.id, { x: px, y: py });
   }
 
@@ -374,9 +374,9 @@ class BuildingSystem {
       if (producedFood > 0) {
         scene.playerResources.food += producedFood;
         scene.updateResourceHud();
-        if (scene.ui) scene.ui.lastActionPanelKey = null;
-        scene.ui?.updateActionPanel();
-        scene.ui?.updateCommandPanel();
+        if (scene.uiSystem) scene.uiSystem.lastActionPanelKey = null;
+        scene.uiSystem?.updateActionPanel();
+        scene.uiSystem?.updateCommandPanel();
         scene.showFloatingMessage(`+${producedFood} food`, scene.scale.width / 2, 92, UI_STYLE.textGood);
         scene.addGameMessage(`+${producedFood} food from farms`, UI_STYLE.textGood);
       }

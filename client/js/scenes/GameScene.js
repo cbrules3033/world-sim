@@ -76,6 +76,12 @@ class GameScene extends Phaser.Scene {
       this.buildGrid.push(row);
     }
 
+    this.pathfindingSystem = new PathfindingSystem(this);
+    this.resourceSystem = new ResourceSystem(this);
+    this.buildingSystem = new BuildingSystem(this);
+    this.unitSystem = new UnitSystem(this);
+    this.uiSystem = new UISystem(this);
+
     for (const entity of this.resourceEntities) {
       this.blockBuildCellsForEntity(entity);
     }
@@ -92,39 +98,39 @@ class GameScene extends Phaser.Scene {
   }
 
   blockBuildCellsForEntity(entity) {
-    this.buildingSys.blockBuildCellsForEntity(entity);
+    this.buildingSystem.blockBuildCellsForEntity(entity);
   }
 
   worldPxToBuildCell(x, y) {
-    return this.pathfinding.worldPxToBuildCell(x, y);
+    return this.pathfindingSystem.worldPxToBuildCell(x, y);
   }
 
   buildCellToWorldPx(x, y) {
-    return this.pathfinding.buildCellToWorldPx(x, y);
+    return this.pathfindingSystem.buildCellToWorldPx(x, y);
   }
 
   isCellPathable(x, y) {
-    return this.pathfinding.isCellPathable(x, y);
+    return this.pathfindingSystem.isCellPathable(x, y);
   }
 
   findPath(startX, startY, goalX, goalY) {
-    return this.pathfinding.findPath(startX, startY, goalX, goalY);
+    return this.pathfindingSystem.findPath(startX, startY, goalX, goalY);
   }
 
   simplifyPath(path) {
-    return this.pathfinding.simplifyPath(path);
+    return this.pathfindingSystem.simplifyPath(path);
   }
 
   pathCellsToWaypoints(path) {
-    return this.pathfinding.pathCellsToWaypoints(path);
+    return this.pathfindingSystem.pathCellsToWaypoints(path);
   }
 
   findNearestPathableCell(cx, cy, maxRadius = 12) {
-    return this.pathfinding.findNearestPathableCell(cx, cy, maxRadius);
+    return this.pathfindingSystem.findNearestPathableCell(cx, cy, maxRadius);
   }
 
   commandMoveUnit(unit, targetWorldX, targetWorldY) {
-    this.pathfinding.commandMoveUnit(unit, targetWorldX, targetWorldY);
+    this.pathfindingSystem.commandMoveUnit(unit, targetWorldX, targetWorldY);
   }
 
   renderPaths() {
@@ -147,11 +153,11 @@ class GameScene extends Phaser.Scene {
   }
 
   assignGatherTask(unit, entity) {
-    this.resources.assignGatherTask(unit, entity);
+    this.resourceSystem.assignGatherTask(unit, entity);
   }
 
   getResourceEntityById(id) {
-    return this.resources.getResourceEntityById(id);
+    return this.resourceSystem.getResourceEntityById(id);
   }
 
   getBuildingById(id) {
@@ -159,31 +165,31 @@ class GameScene extends Phaser.Scene {
   }
 
   clearUnitWork(unit) {
-    this.unitSys.clearUnitWork(unit);
+    this.unitSystem.clearUnitWork(unit);
   }
 
   canAffordCost(cost = {}) {
-    return this.buildingSys.canAffordCost(cost);
+    return this.buildingSystem.canAffordCost(cost);
   }
 
   spendCost(cost = {}) {
-    return this.buildingSys.spendCost(cost);
+    return this.buildingSystem.spendCost(cost);
   }
 
   formatCost(cost = {}) {
-    return this.buildingSys.formatCost(cost);
+    return this.buildingSystem.formatCost(cost);
   }
 
   sendUnitToDropoff(unit) {
-    return this.resources.sendUnitToDropoff(unit);
+    return this.resourceSystem.sendUnitToDropoff(unit);
   }
 
   removeResourceEntity(id) {
-    this.resources.removeResourceEntity(id);
+    this.resourceSystem.removeResourceEntity(id);
   }
 
   updateVillagerWork(unit, delta) {
-    this.resources.updateVillagerWork(unit, delta);
+    this.resourceSystem.updateVillagerWork(unit, delta);
   }
 
   create() {
@@ -221,11 +227,11 @@ class GameScene extends Phaser.Scene {
 
     this.selectedBuildingGraphics = this.add.graphics().setDepth(45);
 
-    this.pathfinding = new PathfindingSystem(this);
-    this.resources = new ResourceSystem(this);
-    this.buildingSys = new BuildingSystem(this);
-    this.unitSys = new UnitSystem(this);
-    this.ui = new UISystem(this);
+    this.pathfindingSystem ||= new PathfindingSystem(this);
+    this.resourceSystem ||= new ResourceSystem(this);
+    this.buildingSystem ||= new BuildingSystem(this);
+    this.unitSystem ||= new UnitSystem(this);
+    this.uiSystem ||= new UISystem(this);
 
     this.worldObjects = (this.worldObjects || []).concat([
       this.terrainGraphics, this.siteGraphics, this.placementGraphics,
@@ -241,7 +247,7 @@ class GameScene extends Phaser.Scene {
 
     this.setupCameras();
 
-    this.ui.create();
+    this.uiSystem.create();
     this.syncCameraIgnores();
 
     this.input.mouse.disableContextMenu();
@@ -267,7 +273,7 @@ class GameScene extends Phaser.Scene {
 
     this.input.keyboard.on('keydown-V', () => {
       this.verboseLogs = !this.verboseLogs;
-      this.ui?.addGameMessage(`Verbose logs ${this.verboseLogs ? 'on' : 'off'}`, UI_STYLE.textMuted);
+      this.uiSystem?.addGameMessage(`Verbose logs ${this.verboseLogs ? 'on' : 'off'}`, UI_STYLE.textMuted);
     });
 
     this.input.keyboard.on('keydown-TAB', (event) => {
@@ -277,6 +283,16 @@ class GameScene extends Phaser.Scene {
     });
 
     this.input.on('pointerdown', (pointer) => this.onPointerDown(pointer));
+
+    console.log('GameScene sanity:', {
+      buildingsIsArray: Array.isArray(this.buildings),
+      unitsIsArray: Array.isArray(this.units),
+      hasBuildingSystem: !!this.buildingSystem,
+      hasUnitSystem: !!this.unitSystem,
+      hasResourceSystem: !!this.resourceSystem,
+      hasPathfindingSystem: !!this.pathfindingSystem,
+      hasUISystem: !!this.uiSystem,
+    });
   }
 
   getPointerWorldPx(pointer = this.input.activePointer) {
@@ -427,7 +443,7 @@ class GameScene extends Phaser.Scene {
   }
 
   renderUnits() {
-    this.unitSys.renderUnits();
+    this.unitSystem.renderUnits();
   }
 
   setupCameras() {
@@ -477,23 +493,23 @@ class GameScene extends Phaser.Scene {
 
   toggleDebug() {
     this.debugVisible = !this.debugVisible;
-    if (this.ui) this.ui.debugPanel.visible = this.debugVisible;
+    if (this.uiSystem) this.uiSystem.debugPanel.visible = this.debugVisible;
   }
 
   showFloatingMessage(text, x, y, color) {
-    return this.ui?.showFloatingMessage(text, x, y, color);
+    return this.uiSystem?.showFloatingMessage(text, x, y, color);
   }
 
   addGameMessage(text, color) {
-    return this.ui?.addGameMessage(text, color);
+    return this.uiSystem?.addGameMessage(text, color);
   }
 
   isPointerOverUI(pointer) {
-    return this.ui?.isPointerOverUI(pointer) ?? false;
+    return this.uiSystem?.isPointerOverUI(pointer) ?? false;
   }
 
   updateResourceHud() {
-    this.ui?.updateResourceHud();
+    this.uiSystem?.updateResourceHud();
   }
 
   createResourceHud() {
@@ -976,19 +992,19 @@ class GameScene extends Phaser.Scene {
   }
 
   getBuildingAtPointer(pointer) {
-    return this.buildingSys.getBuildingAtPointer(pointer);
+    return this.buildingSystem.getBuildingAtPointer(pointer);
   }
 
   selectBuilding(building) {
-    this.buildingSys.selectBuilding(building);
+    this.buildingSystem.selectBuilding(building);
   }
 
   deselectBuilding() {
-    this.buildingSys.deselectBuilding();
+    this.buildingSystem.deselectBuilding();
   }
 
   trainVillager(building) {
-    this.buildingSys.trainVillager(building);
+    this.buildingSystem.trainVillager(building);
   }
 
   pointInRect(px, py, x, y, w, h) {
@@ -1014,7 +1030,7 @@ class GameScene extends Phaser.Scene {
   }
 
   getUnitAtPointer(pointer = this.input.activePointer) {
-    return this.unitSys.getUnitAtPointer(pointer);
+    return this.unitSystem.getUnitAtPointer(pointer);
   }
 
   onPointerDown(pointer) {
@@ -1115,23 +1131,23 @@ class GameScene extends Phaser.Scene {
   }
 
   clearUnitSelection() {
-    this.unitSys.clearUnitSelection();
+    this.unitSystem.clearUnitSelection();
   }
 
   placeBuilding(type, buildX, buildY) {
-    return this.buildingSys.placeBuilding(type, buildX, buildY);
+    return this.buildingSystem.placeBuilding(type, buildX, buildY);
   }
 
   spawnStartingVillagers(tc) {
-    this.buildingSys.spawnStartingVillagers(tc);
+    this.buildingSystem.spawnStartingVillagers(tc);
   }
 
   startBuildingPlacement(type) {
-    this.buildingSys.startBuildingPlacement(type);
+    this.buildingSystem.startBuildingPlacement(type);
   }
 
   cancelBuildingPlacement() {
-    this.buildingSys.cancelBuildingPlacement();
+    this.buildingSystem.cancelBuildingPlacement();
   }
 
   jumpToFirstSite(siteType) {
@@ -1157,29 +1173,29 @@ class GameScene extends Phaser.Scene {
   }
 
   isBuildable(buildX, buildY, fw, fh) {
-    return this.buildingSys.isBuildable(buildX, buildY, fw, fh);
+    return this.buildingSystem.isBuildable(buildX, buildY, fw, fh);
   }
 
   getPlacementStatusText() {
-    return this.buildingSys.getPlacementStatusText();
+    return this.buildingSystem.getPlacementStatusText();
   }
 
   renderSelectedBuilding() {
-    this.buildingSys.renderSelectedBuilding();
+    this.buildingSystem.renderSelectedBuilding();
   }
 
   renderBuildingGhost() {
-    this.buildingSys.renderBuildingGhost();
+    this.buildingSystem.renderBuildingGhost();
   }
 
   updateUnits(delta) {
-    this.unitSys.updateUnits(delta);
+    this.unitSystem.updateUnits(delta);
   }
 
   update(time, delta) {
     this.updateUnits(delta);
-    this.buildingSys.update(delta);
-    this.ui.update();
+    this.buildingSystem.update(delta);
+    this.uiSystem.update();
 
     if (!this.debugText) return;
 
