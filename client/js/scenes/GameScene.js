@@ -23,7 +23,7 @@ class GameScene extends Phaser.Scene {
       stone: 0,
       copper: 0,
       iron: 0,
-      food: 0,
+      food: 100,
     };
 
     if (!Array.isArray(data.resourceEntities)) {
@@ -951,6 +951,7 @@ class GameScene extends Phaser.Scene {
       { key: 'stone', label: 'Stone', color: 0xaaaaaa },
       { key: 'copper', label: 'Copper', color: 0xcd7f32 },
       { key: 'iron', label: 'Iron', color: 0x777777 },
+      { key: 'population', label: 'Pop', color: 0x80bfff },
     ];
 
     let x = 0;
@@ -986,8 +987,12 @@ class GameScene extends Phaser.Scene {
     this.populationUsed = this.units.filter(u => u.ownerId === this.playerId).length;
 
     for (const [key, text] of Object.entries(this.resourceTexts)) {
-      const label = key.charAt(0).toUpperCase() + key.slice(1);
-      text.setText(`${label}: ${this.playerResources[key] || 0}`);
+      if (key === 'population') {
+        text.setText(`Pop: ${this.populationUsed}/${this.populationCap}`);
+      } else {
+        const label = key.charAt(0).toUpperCase() + key.slice(1);
+        text.setText(`${label}: ${this.playerResources[key] || 0}`);
+      }
     }
   }
 
@@ -1035,6 +1040,35 @@ class GameScene extends Phaser.Scene {
       const button = this.createBuildButton(type, def, bx, by);
       this.commandPanel.add(button.container);
       this.buildButtons.push(button);
+    });
+
+    this.commandActionBtn = this.add.container(panelWidth - 200, 8);
+    this.commandActionBtn.setVisible(false);
+    this.commandPanel.add(this.commandActionBtn);
+
+    const actionBg = this.add.rectangle(0, 0, 186, 60, UI_STYLE.buttonBg, 0.95)
+      .setOrigin(0, 0)
+      .setInteractive({ useHandCursor: true });
+
+    const actionBorder = this.add.rectangle(0, 0, 186, 60)
+      .setOrigin(0, 0)
+      .setStrokeStyle(1, UI_STYLE.panelBorder, 0.8);
+
+    const actionLabel = this.add.text(8, 6, '', {
+      fontSize: '11px',
+      color: UI_STYLE.textPrimary,
+      fontFamily: UI_STYLE.fontFamily,
+    });
+
+    this.commandActionBtn.add([actionBg, actionBorder, actionLabel]);
+    this.commandActionBtn.bg = actionBg;
+    this.commandActionBtn.border = actionBorder;
+    this.commandActionBtn.label = actionLabel;
+
+    actionBg.on('pointerdown', () => {
+      if (this.selectedBuilding && this.selectedBuilding.type === 'town_center' && this.selectedBuilding.constructed) {
+        this.trainVillager(this.selectedBuilding);
+      }
     });
   }
 
@@ -1095,6 +1129,28 @@ class GameScene extends Phaser.Scene {
         button.border.setStrokeStyle(1, 0x333333, 0.6);
       }
     }
+
+    if (this.commandActionBtn) {
+      const b = this.selectedBuilding;
+      if (b && b.type === 'town_center' && b.constructed) {
+        this.commandActionBtn.setVisible(true);
+        const canAfford = this.canAffordCost(VILLAGER_COST);
+        const popOk = this.populationUsed < this.populationCap;
+        const enabled = canAfford && popOk;
+
+        this.commandActionBtn.label.setText(`R Train Villager - 50f\n${enabled ? '' : '(blocked)'}`);
+
+        if (enabled) {
+          this.commandActionBtn.bg.setFillStyle(UI_STYLE.buttonBgHover, 0.95);
+          this.commandActionBtn.label.setColor(UI_STYLE.textPrimary);
+        } else {
+          this.commandActionBtn.bg.setFillStyle(UI_STYLE.buttonBgDisabled, 0.9);
+          this.commandActionBtn.label.setColor(UI_STYLE.textMuted);
+        }
+      } else {
+        this.commandActionBtn.setVisible(false);
+      }
+    }
   }
 
   createSelectedPanel() {
@@ -1135,10 +1191,22 @@ class GameScene extends Phaser.Scene {
 
     if (this.selectedBuilding) {
       const b = this.selectedBuilding;
-      this.selectedTitleText.setText(BUILDING_DEFS[b.type]?.label || b.type);
-      const lines = [`State: ${b.constructed ? 'Active' : 'Building...'}`];
+      const def = BUILDING_DEFS[b.type];
+      this.selectedTitleText.setText(def?.label || b.type);
+      const lines = [];
+      if (!b.constructed) {
+        const total = def?.buildTimeMs || 1;
+        const progress = Math.floor((1 - b.constructionTimer / total) * 100);
+        lines.push('State: Building...');
+        lines.push(`Progress: ${Phaser.Math.Clamp(progress, 0, 100)}%`);
+      } else {
+        lines.push('State: Active');
+      }
+      lines.push(`HP: ${b.hp}`);
       if (b.constructed && b.type === 'town_center') {
-        lines.push('', 'R - Train Villager (50 food)');
+        lines.push(`Pop: ${this.populationUsed}/${this.populationCap}`);
+        lines.push('R - Train Villager');
+        lines.push(`Cost: ${this.formatCost(VILLAGER_COST)}`);
       }
       this.selectedBodyText.setText(lines.join('\n'));
       return;
@@ -1273,14 +1341,22 @@ class GameScene extends Phaser.Scene {
     if (!building) return;
 
     if (this.populationUsed >= this.populationCap) {
+      console.log('Train blocked: population cap reached');
       this.showFloatingMessage('Population cap reached!');
       return;
     }
 
     if (!this.spendCost(VILLAGER_COST)) {
+      console.log('Train blocked: not enough food');
       this.showFloatingMessage(`Need: ${this.formatCost(VILLAGER_COST)}`);
       return;
     }
+
+    console.log('Train villager:', {
+      food: this.playerResources.food,
+      pop: `${this.populationUsed}/${this.populationCap}`,
+      tc: building.id,
+    });
 
     const cx = building.buildX + building.footprintW / 2;
     const cy = building.buildY + building.footprintH / 2;
@@ -1388,6 +1464,8 @@ class GameScene extends Phaser.Scene {
   }
 
   onPointerDown(pointer) {
+    if (this.isPointerOverUI(pointer)) return;
+
     const wp = this.getPointerWorldPx(pointer);
     const isLeftClick = pointer.button === 0;
     const isRightClick = pointer.button === 2;
@@ -1401,7 +1479,6 @@ class GameScene extends Phaser.Scene {
     });
 
     if (isLeftClick) {
-      if (this.isPointerOverUI(pointer)) return;
 
       if (this.placementMode) {
         if (!this.ghostValid) {
@@ -1740,10 +1817,16 @@ class GameScene extends Phaser.Scene {
     this.farmTickTimer += delta;
     if (this.farmTickTimer >= FARM_TICK_INTERVAL_MS) {
       this.farmTickTimer -= FARM_TICK_INTERVAL_MS;
+      let producedFood = 0;
       for (const b of this.buildings) {
         if (b.constructed && b.type === 'farm' && b.ownerId === this.playerId) {
-          this.playerResources.food += FOOD_PER_FARM_TICK;
+          producedFood += FOOD_PER_FARM_TICK;
         }
+      }
+      if (producedFood > 0) {
+        this.playerResources.food += producedFood;
+        this.updateResourceHud();
+        this.showFloatingMessage(`+${producedFood} food`, this.scale.width / 2, 92, UI_STYLE.textGood);
       }
     }
 
@@ -1762,6 +1845,10 @@ class GameScene extends Phaser.Scene {
           this.spawnStartingVillagers(b);
         }
         buildingUpdated = true;
+        const def = BUILDING_DEFS[b.type];
+        if (def) {
+          this.showFloatingMessage(`${def.label} complete`, this.scale.width / 2, 92, UI_STYLE.textGood);
+        }
       }
     }
     if (buildingUpdated) {
