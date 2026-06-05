@@ -46,6 +46,22 @@ class GameScene extends Phaser.Scene {
     this.selectedBuilding = null;
     this.farmTickTimer = 0;
 
+    this.dragSelect = {
+      active: false,
+      startX: 0,
+      startY: 0,
+      currentX: 0,
+      currentY: 0,
+      moved: false,
+    };
+
+    this.lastClickTime = 0;
+    this.lastClickedUnitType = null;
+    this.lastClickedUnitId = null;
+    this.doubleClickMs = 300;
+
+    this.idleVillagerIndex = 0;
+
     this.lastActionPanelKey = null;
 
     this.eventLog = [];
@@ -238,6 +254,7 @@ class GameScene extends Phaser.Scene {
     this.pathGraphics = this.add.graphics().setDepth(25);
     this.unitGraphics = this.add.graphics().setDepth(30);
     this.selectionGraphics = this.add.graphics().setDepth(40);
+    this.selectionBoxGraphics = this.add.graphics().setDepth(42);
 
     this.selectedBuildingGraphics = this.add.graphics().setDepth(45);
 
@@ -251,7 +268,7 @@ class GameScene extends Phaser.Scene {
       this.terrainGraphics, this.siteGraphics, this.placementGraphics,
       this.entityGraphics, this.buildingGraphics, this.spawnGraphics,
       this.pathGraphics, this.unitGraphics, this.selectionGraphics,
-      this.selectedBuildingGraphics,
+      this.selectionBoxGraphics, this.selectedBuildingGraphics,
     ]);
 
     this.renderTerrain();
@@ -273,7 +290,19 @@ class GameScene extends Phaser.Scene {
     for (const [key, def] of Object.entries(BUILDING_DEFS)) {
       this.input.keyboard.on(`keydown-${def.hotkey}`, () => this.startBuildingPlacement(key));
     }
-    this.input.keyboard.on('keydown-ESC', () => this.cancelBuildingPlacement());
+    this.input.keyboard.on('keydown-ESC', () => {
+      if (this.placementMode) {
+        this.cancelBuildingPlacement();
+        return;
+      }
+      this.clearUnitSelection();
+      this.deselectBuilding();
+      this.renderUnits();
+      this.renderPaths();
+      this.addGameMessage('Selection cleared', UI_STYLE.textMuted);
+    });
+
+    this.input.keyboard.on('keydown-PERIOD', () => this.selectNextIdleVillager());
     this.input.keyboard.on('keydown-R', () => {
       if (this.selectedBuilding && this.selectedBuilding.type === 'town_center' && this.selectedBuilding.constructed) {
         this.trainVillager(this.selectedBuilding);
@@ -297,6 +326,7 @@ class GameScene extends Phaser.Scene {
     });
 
     this.input.on('pointerdown', (pointer) => this.onPointerDown(pointer));
+    this.input.on('pointerup', (pointer) => this.onPointerUp(pointer));
 
     console.log('GameScene sanity:', {
       buildingsIsArray: Array.isArray(this.buildings),
@@ -475,9 +505,22 @@ class GameScene extends Phaser.Scene {
     this.uiCamera.roundPixels = false;
 
     this.input.on('pointermove', (pointer) => {
-      if (pointer.isDown && pointer.downElement === this.game.canvas && !this.isPointerOverUI(pointer)) {
+      const isPan = pointer.isDown && !this.dragSelect?.active && pointer.downElement === this.game.canvas && !this.isPointerOverUI(pointer);
+      if (isPan) {
         this.worldCamera.scrollX -= (pointer.x - pointer.prevPosition.x) / this.worldCamera.zoom;
         this.worldCamera.scrollY -= (pointer.y - pointer.prevPosition.y) / this.worldCamera.zoom;
+      }
+
+      if (this.dragSelect?.active) {
+        const wp = this.getPointerWorldPx(pointer);
+        this.dragSelect.currentX = wp.x;
+        this.dragSelect.currentY = wp.y;
+        const dx = this.dragSelect.currentX - this.dragSelect.startX;
+        const dy = this.dragSelect.currentY - this.dragSelect.startY;
+        if (Math.abs(dx) > 6 || Math.abs(dy) > 6) {
+          this.dragSelect.moved = true;
+        }
+        this.renderSelectionBox();
       }
 
       const wp = this.getPointerWorldPx(pointer);
@@ -597,17 +640,59 @@ class GameScene extends Phaser.Scene {
         return;
       }
 
-      this.clearUnitSelection();
-      this.deselectBuilding();
+      if (!this.placementMode) {
+        this.dragSelect.active = true;
+        this.dragSelect.startX = wp.x;
+        this.dragSelect.startY = wp.y;
+        this.dragSelect.currentX = wp.x;
+        this.dragSelect.currentY = wp.y;
+        this.dragSelect.moved = false;
+      }
 
       const unit = this.getUnitAtPointer(pointer);
       if (this.verboseLogs) console.log('Clicked unit:', unit);
 
       if (unit) {
-        unit.selected = true;
-        this.selectedUnits = [unit];
+        const now = performance.now();
+        const isDoubleClick =
+          this.lastClickedUnitId === unit.id &&
+          now - this.lastClickTime <= this.doubleClickMs;
+
+        this.lastClickTime = now;
+        this.lastClickedUnitId = unit.id;
+        this.lastClickedUnitType = unit.type;
+
+        if (isDoubleClick) {
+          this.selectUnitsOfTypeOnScreen(unit.type);
+          return;
+        }
+
+        const additive = pointer.event?.shiftKey || false;
+
+        if (!additive) {
+          this.clearUnitSelection();
+          this.deselectBuilding();
+        }
+
+        if (additive && unit.selected) {
+          unit.selected = false;
+          this.selectedUnits = this.selectedUnits.filter(u => u.id !== unit.id);
+        } else {
+          unit.selected = true;
+          if (additive) {
+            this.selectedUnits = Array.from(new Set([...this.selectedUnits, unit]));
+          } else {
+            this.selectedUnits = [unit];
+          }
+        }
+
         this.renderUnits();
         return;
+      }
+
+      if (!pointer.event?.shiftKey) {
+        this.clearUnitSelection();
+        this.deselectBuilding();
       }
 
       const building = this.getBuildingAtPointer(pointer);
@@ -661,6 +746,146 @@ class GameScene extends Phaser.Scene {
         this.renderPaths();
       }
     }
+  }
+
+  renderSelectionBox() {
+    this.selectionBoxGraphics.clear();
+    if (!this.dragSelect?.active || !this.dragSelect.moved) return;
+
+    const x1 = this.dragSelect.startX;
+    const y1 = this.dragSelect.startY;
+    const x2 = this.dragSelect.currentX;
+    const y2 = this.dragSelect.currentY;
+    const x = Math.min(x1, x2);
+    const y = Math.min(y1, y2);
+    const w = Math.abs(x2 - x1);
+    const h = Math.abs(y2 - y1);
+
+    this.selectionBoxGraphics.fillStyle(0x00ff88, 0.08);
+    this.selectionBoxGraphics.fillRect(x, y, w, h);
+    this.selectionBoxGraphics.lineStyle(2, 0x00ff88, 0.9);
+    this.selectionBoxGraphics.strokeRect(x, y, w, h);
+  }
+
+  onPointerUp(pointer) {
+    if (!this.dragSelect?.active) return;
+
+    const wasDrag = this.dragSelect.moved;
+
+    this.dragSelect.active = false;
+    this.selectionBoxGraphics.clear();
+
+    if (!wasDrag) return;
+
+    this.selectUnitsInBox(
+      this.dragSelect.startX, this.dragSelect.startY,
+      this.dragSelect.currentX, this.dragSelect.currentY,
+      pointer.event?.shiftKey || false
+    );
+  }
+
+  selectUnitsInBox(x1, y1, x2, y2, additive = false) {
+    const minX = Math.min(x1, x2);
+    const maxX = Math.max(x1, x2);
+    const minY = Math.min(y1, y2);
+    const maxY = Math.max(y1, y2);
+
+    if (!additive) {
+      this.clearUnitSelection();
+      this.deselectBuilding();
+    }
+
+    const selected = [];
+
+    for (const unit of this.units) {
+      if (unit.ownerId !== this.playerId) continue;
+      if (unit.x >= minX && unit.x <= maxX && unit.y >= minY && unit.y <= maxY) {
+        unit.selected = true;
+        selected.push(unit);
+      }
+    }
+
+    this.selectedUnits = additive
+      ? Array.from(new Set([...this.selectedUnits, ...selected]))
+      : selected;
+
+    this.renderUnits();
+    this.renderPaths();
+
+    if (selected.length > 0) {
+      this.addGameMessage(`Selected ${selected.length} unit${selected.length === 1 ? '' : 's'}`, UI_STYLE.textMuted);
+    }
+  }
+
+  isUnitVisibleOnScreen(unit) {
+    const cam = this.worldCamera;
+    const view = cam.worldView;
+    return (
+      unit.x >= view.x &&
+      unit.x <= view.x + view.width &&
+      unit.y >= view.y &&
+      unit.y <= view.y + view.height
+    );
+  }
+
+  selectUnitsOfTypeOnScreen(type) {
+    this.clearUnitSelection();
+    this.deselectBuilding();
+
+    const selected = [];
+
+    for (const unit of this.units) {
+      if (unit.ownerId !== this.playerId) continue;
+      if (unit.type !== type) continue;
+      if (!this.isUnitVisibleOnScreen(unit)) continue;
+      unit.selected = true;
+      selected.push(unit);
+    }
+
+    this.selectedUnits = selected;
+    this.renderUnits();
+    this.renderPaths();
+
+    this.addGameMessage(`Selected ${selected.length} ${type}${selected.length === 1 ? '' : 's'}`, UI_STYLE.textMuted);
+  }
+
+  isIdleVillager(unit) {
+    return (
+      unit.ownerId === this.playerId &&
+      unit.type === 'villager' &&
+      (!unit.workState || unit.workState === 'idle') &&
+      (!unit.state || unit.state === 'idle') &&
+      !unit.carryResource
+    );
+  }
+
+  getIdleVillagers() {
+    return this.units.filter(u => this.isIdleVillager(u));
+  }
+
+  selectNextIdleVillager() {
+    const idle = this.getIdleVillagers();
+    if (idle.length === 0) {
+      this.addGameMessage('No idle villagers', UI_STYLE.textMuted);
+      return;
+    }
+
+    this.idleVillagerIndex = this.idleVillagerIndex % idle.length;
+    const unit = idle[this.idleVillagerIndex];
+    this.idleVillagerIndex = (this.idleVillagerIndex + 1) % idle.length;
+
+    this.clearUnitSelection();
+    this.deselectBuilding();
+
+    unit.selected = true;
+    this.selectedUnits = [unit];
+
+    this.worldCamera.centerOn(unit.x, unit.y);
+
+    this.renderUnits();
+    this.renderPaths();
+
+    this.addGameMessage(`Idle villager ${this.idleVillagerIndex}/${idle.length}`, UI_STYLE.textMuted);
   }
 
   clearUnitSelection() {

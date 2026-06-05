@@ -85,9 +85,11 @@ class UISystem {
     const scene = this.scene;
     scene.refreshPopulationUsed();
 
+    const idleCount = scene.getIdleVillagers ? scene.getIdleVillagers().length : 0;
+
     for (const [key, text] of Object.entries(this.resourceTexts)) {
       if (key === 'population') {
-        text.setText(`Pop ${scene.populationUsed}/${scene.populationCap}`);
+        text.setText(`Pop ${scene.populationUsed}/${scene.populationCap} I ${idleCount}`);
       } else {
         const label = key.charAt(0).toUpperCase() + key.slice(1);
         text.setText(`${label} ${scene.playerResources[key] || 0}`);
@@ -477,7 +479,7 @@ class UISystem {
       this.createActionButton(label, 12, 34, enabled, () => {
         scene.trainVillager(scene.selectedBuilding);
         scene.lastActionPanelKey = null;
-        scene.ui.updateActionPanel();
+        scene.uiSystem?.updateActionPanel();
       });
 
       return;
@@ -517,7 +519,7 @@ class UISystem {
     this.hotkeyHelpText = scene.registerUIObject(scene.add.text(
       scene.scale.width - 12,
       12,
-      '` Debug   RMB Move/Gather   Wheel Zoom   Drag Pan   Tab Grid',
+      '` Debug   . Idle   RMB Move/Gather   Drag Select   Shift+Click   Esc Clear   Tab Grid',
       {
         fontSize: '11px',
         color: UI_STYLE.textMuted,
