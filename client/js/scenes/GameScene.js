@@ -782,7 +782,7 @@ class GameScene extends Phaser.Scene {
       const color = TERRAIN_COLORS[tile.t] || 0x4a8c3f;
       g.fillStyle(color, 1);
 
-      const bleed = this.showTerrainGrid ? 0 : 1;
+      const bleed = this.showTerrainGrid ? 0 : 0.75;
       g.fillRect(x - bleed, y - bleed, s + bleed * 2, s + bleed * 2);
 
       if (this.showTerrainGrid) {
@@ -939,12 +939,12 @@ class GameScene extends Phaser.Scene {
     this.worldCamera = this.cameras.main;
     this.worldCamera.setBounds(0, 0, worldW, worldH);
     this.worldCamera.setZoom(1);
-    this.worldCamera.roundPixels = true;
+    this.worldCamera.roundPixels = false;
 
     this.uiCamera = this.cameras.add(0, 0, this.scale.width, this.scale.height);
     this.uiCamera.setScroll(0, 0);
     this.uiCamera.setZoom(1);
-    this.uiCamera.roundPixels = true;
+    this.uiCamera.roundPixels = false;
 
     this.input.on('pointermove', (pointer) => {
       if (pointer.isDown && pointer.downElement === this.game.canvas && !this.isPointerOverUI(pointer)) {

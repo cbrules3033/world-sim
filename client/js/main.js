@@ -3,9 +3,9 @@ const game = new Phaser.Game({
   parent: 'game-container',
   backgroundColor: '#111111',
   render: {
-    antialias: false,
-    pixelArt: true,
-    roundPixels: true,
+    antialias: true,
+    pixelArt: false,
+    roundPixels: false,
   },
   scale: {
     mode: Phaser.Scale.FIT,
