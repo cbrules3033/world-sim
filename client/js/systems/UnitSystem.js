@@ -44,7 +44,7 @@ class UnitSystem {
     for (const u of scene.units) {
       let fill = 0xffffcc;
       if (u.workState === 'gathering') fill = 0x66ff66;
-      if (u.carryResource) fill = scene.resources.getCarryColor(u.carryResource);
+      if (u.carryResource) fill = scene.resourceSystem.getCarryColor(u.carryResource);
       if (u.selected) fill = 0xffffff;
 
       scene.unitGraphics.fillStyle(fill, 1);
