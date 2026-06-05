@@ -47,6 +47,9 @@ class GameScene extends Phaser.Scene {
 
     this.lastActionPanelKey = null;
 
+    this.eventLog = [];
+    this.verboseLogs = false;
+
     this.worldObjects = [];
     this.uiObjects = [];
 
@@ -717,10 +720,13 @@ class GameScene extends Phaser.Scene {
     this.unitGraphics = this.add.graphics().setDepth(30);
     this.selectionGraphics = this.add.graphics().setDepth(40);
 
+    this.selectedBuildingGraphics = this.add.graphics().setDepth(45);
+
     this.worldObjects = (this.worldObjects || []).concat([
       this.terrainGraphics, this.siteGraphics, this.placementGraphics,
       this.entityGraphics, this.buildingGraphics, this.spawnGraphics,
       this.pathGraphics, this.unitGraphics, this.selectionGraphics,
+      this.selectedBuildingGraphics,
     ]);
 
     this.renderTerrain();
@@ -753,6 +759,11 @@ class GameScene extends Phaser.Scene {
     this.input.keyboard.on('keydown-C', () => this.jumpToFirstResource('copper'));
     this.input.keyboard.on('keydown-I', () => this.jumpToFirstResource('iron'));
     this.input.keyboard.on('keydown-O', () => this.jumpToFirstResource('stone'));
+
+    this.input.keyboard.on('keydown-V', () => {
+      this.verboseLogs = !this.verboseLogs;
+      this.addGameMessage(`Verbose logs ${this.verboseLogs ? 'on' : 'off'}`, UI_STYLE.textMuted);
+    });
 
     this.input.keyboard.on('keydown-TAB', (event) => {
       event.event?.preventDefault?.();
@@ -984,6 +995,7 @@ class GameScene extends Phaser.Scene {
     this.createActionPanel();
     this.createDebugPanel();
     this.createHotkeyHelp();
+    this.createMessageLog();
     this.layoutUI();
 
     this.scale.on('resize', (gameSize) => {
@@ -992,6 +1004,46 @@ class GameScene extends Phaser.Scene {
       }
       this.layoutUI();
     });
+  }
+
+  addGameMessage(text, color = UI_STYLE.textPrimary) {
+    this.eventLog.unshift({ text, color, timestamp: Date.now() });
+    this.eventLog = this.eventLog.slice(0, 4);
+    this.updateMessageLog?.();
+  }
+
+  createMessageLog() {
+    this.messageLogPanel = this.registerUIObject(this.add.container(12, 50));
+    this.messageLogPanel.setDepth(UI_DEPTH);
+
+    this.messageLogTexts = [];
+
+    for (let i = 0; i < 4; i++) {
+      const t = this.add.text(0, i * 18, '', {
+        fontSize: '12px',
+        color: UI_STYLE.textMuted,
+        fontFamily: UI_STYLE.fontFamily,
+      });
+
+      this.messageLogPanel.add(t);
+      this.messageLogTexts.push(t);
+    }
+  }
+
+  updateMessageLog() {
+    if (!this.messageLogTexts) return;
+
+    for (let i = 0; i < this.messageLogTexts.length; i++) {
+      const msg = this.eventLog[i];
+
+      if (!msg) {
+        this.messageLogTexts[i].setText('');
+        continue;
+      }
+
+      this.messageLogTexts[i].setText(msg.text);
+      this.messageLogTexts[i].setColor(msg.color);
+    }
   }
 
   createResourceHud() {
@@ -1044,10 +1096,10 @@ class GameScene extends Phaser.Scene {
 
     for (const [key, text] of Object.entries(this.resourceTexts)) {
       if (key === 'population') {
-        text.setText(`Pop: ${this.populationUsed}/${this.populationCap}`);
+        text.setText(`Pop ${this.populationUsed}/${this.populationCap}`);
       } else {
         const label = key.charAt(0).toUpperCase() + key.slice(1);
-        text.setText(`${label}: ${this.playerResources[key] || 0}`);
+        text.setText(`${label} ${this.playerResources[key] || 0}`);
       }
     }
   }
@@ -1321,29 +1373,77 @@ class GameScene extends Phaser.Scene {
     this.selectedPanel.add([bg, border, this.selectedTitleText, this.selectedBodyText]);
   }
 
+  getVillagerTaskText(unit) {
+    if (!unit.workState || unit.workState === 'idle') return 'Idle';
+
+    if (unit.workState === 'moving_to_resource') {
+      return `Going to ${unit.gatherResourceType || 'resource'}`;
+    }
+
+    if (unit.workState === 'gathering') {
+      return `Gathering ${unit.gatherResourceType || unit.carryResource || 'resource'}`;
+    }
+
+    if (unit.workState === 'moving_to_dropoff') {
+      return `Returning ${unit.carryResource || 'resources'}`;
+    }
+
+    return unit.workState;
+  }
+
+  getBuildingInfoLines(building) {
+    const def = BUILDING_DEFS[building.type];
+    const lines = [];
+
+    if (!building.constructed) {
+      const total = def.buildTimeMs || 1;
+      const progress = Phaser.Math.Clamp(
+        Math.floor((1 - building.constructionTimer / total) * 100),
+        0, 100
+      );
+
+      lines.push('State: Building...');
+      lines.push(`Progress: ${progress}%`);
+    } else {
+      lines.push('State: Active');
+    }
+
+    lines.push(`HP: ${building.hp}`);
+
+    if (building.type === 'house') {
+      lines.push(`Provides: +${POPULATION.PER_HOUSE} Pop`);
+    }
+
+    if (building.type === 'town_center') {
+      lines.push(`Pop: ${this.populationUsed}/${this.populationCap}`);
+      lines.push(`Train: ${this.formatCost(VILLAGER_COST)}`);
+    }
+
+    if (building.type === 'farm') {
+      lines.push(`Produces: +${FOOD_PER_FARM_TICK} food / ${FARM_TICK_INTERVAL_MS / 1000}s`);
+    }
+
+    return lines;
+  }
+
   updateSelectedPanel() {
     if (!this.selectedTitleText || !this.selectedBodyText) return;
 
+    if (this.placementMode) {
+      this.selectedTitleText.setText(`Placing ${this.placementMode.label}`);
+      this.selectedBodyText.setText([
+        `Cost: ${this.formatCost(this.placementMode.cost || {})}`,
+        `Size: ${this.placementMode.w}x${this.placementMode.h}`,
+        `Status: ${this.getPlacementStatusText()}`,
+        'Left-click to place',
+        'Esc to cancel',
+      ].join('\n'));
+      return;
+    }
+
     if (this.selectedBuilding) {
-      const b = this.selectedBuilding;
-      const def = BUILDING_DEFS[b.type];
-      this.selectedTitleText.setText(def?.label || b.type);
-      const lines = [];
-      if (!b.constructed) {
-        const total = def?.buildTimeMs || 1;
-        const progress = Math.floor((1 - b.constructionTimer / total) * 100);
-        lines.push('State: Building...');
-        lines.push(`Progress: ${Phaser.Math.Clamp(progress, 0, 100)}%`);
-      } else {
-        lines.push('State: Active');
-      }
-      lines.push(`HP: ${b.hp}`);
-      if (b.constructed && b.type === 'town_center') {
-        lines.push(`Pop: ${this.populationUsed}/${this.populationCap}`);
-        lines.push('R - Train Villager');
-        lines.push(`Cost: ${this.formatCost(VILLAGER_COST)}`);
-      }
-      this.selectedBodyText.setText(lines.join('\n'));
+      this.selectedTitleText.setText(BUILDING_DEFS[this.selectedBuilding.type]?.label || this.selectedBuilding.type);
+      this.selectedBodyText.setText(this.getBuildingInfoLines(this.selectedBuilding).join('\n'));
       return;
     }
 
@@ -1361,20 +1461,16 @@ class GameScene extends Phaser.Scene {
 
     const u = this.selectedUnits[0];
 
-    const carryLine = u.carryAmount > 0
-      ? `Carry: ${u.carryAmount}/${u.carryCapacity} ${u.carryResource || ''}`
-      : `Carry: 0/${u.carryCapacity || 0}`;
-
-    const jobLine = u.gatherResourceType
-      ? `Job: ${u.workState} ${u.gatherResourceType}`
-      : `Job: ${u.workState || 'idle'}`;
+    const carryText = u.carryAmount > 0
+      ? `${u.carryAmount}/${u.carryCapacity} ${u.carryResource}`
+      : `0/${u.carryCapacity || 10}`;
 
     this.selectedTitleText.setText(u.type === 'villager' ? 'Villager' : u.type);
 
     this.selectedBodyText.setText([
       `Move: ${u.state || 'idle'}`,
-      jobLine,
-      carryLine,
+      `Task: ${this.getVillagerTaskText(u)}`,
+      `Carry: ${carryText}`,
       `HP: ${u.hp || '—'}`,
     ].join('\n'));
   }
@@ -1442,6 +1538,10 @@ class GameScene extends Phaser.Scene {
     if (this.debugPanel) {
       this.debugPanel.setPosition(this.scale.width - 372, 50);
     }
+
+    if (this.messageLogPanel) {
+      this.messageLogPanel.setPosition(12, 50);
+    }
   }
 
   getBuildingAtPointer(pointer) {
@@ -1469,33 +1569,35 @@ class GameScene extends Phaser.Scene {
 
   selectBuilding(building) {
     this.selectedBuilding = building;
-    console.log('Building selected:', building.type, building.id);
+    this.clearUnitSelection();
+    this.renderUnits();
+    this.renderSelectedBuilding();
+    if (this.verboseLogs) console.log('Building selected:', building.type, building.id);
   }
 
   deselectBuilding() {
     this.selectedBuilding = null;
+    this.renderSelectedBuilding();
   }
 
   trainVillager(building) {
     if (!building) return;
 
     if (this.populationUsed >= this.populationCap) {
-      console.log('Train blocked: population cap reached');
+      if (this.verboseLogs) console.log('Train blocked: population cap reached');
       this.showFloatingMessage('Population cap reached!');
+      this.addGameMessage('Population cap reached!', UI_STYLE.textWarn);
       return;
     }
 
     if (!this.spendCost(VILLAGER_COST)) {
-      console.log('Train blocked: not enough food');
+      if (this.verboseLogs) console.log('Train blocked: not enough food');
       this.showFloatingMessage(`Need: ${this.formatCost(VILLAGER_COST)}`);
+      this.addGameMessage(`Need ${this.formatCost(VILLAGER_COST)}`, UI_STYLE.textWarn);
       return;
     }
 
-    console.log('Train villager:', {
-      food: this.playerResources.food,
-      pop: `${this.populationUsed}/${this.populationCap}`,
-      tc: building.id,
-    });
+    if (this.verboseLogs) console.log('Train villager:', { food: this.playerResources.food, pop: `${this.populationUsed}/${this.populationCap}`, tc: building.id });
 
     const cx = building.buildX + building.footprintW / 2;
     const cy = building.buildY + building.footprintH / 2;
@@ -1550,7 +1652,8 @@ class GameScene extends Phaser.Scene {
     this.units.push(villager);
     this.renderUnits();
     this.showFloatingMessage('Villager trained!', this.scale.width / 2, 58, UI_STYLE.textGood);
-    console.log('Villager trained at:', building.id, { x: px, y: py });
+    this.addGameMessage('Villager trained', UI_STYLE.textGood);
+    if (this.verboseLogs) console.log('Villager trained at:', building.id, { x: px, y: py });
   }
 
   pointInRect(px, py, x, y, w, h) {
@@ -1617,31 +1720,22 @@ class GameScene extends Phaser.Scene {
     const isLeftClick = pointer.button === 0;
     const isRightClick = pointer.button === 2;
 
-    console.log('POINTER DOWN:', {
-      button: pointer.button,
-      worldX: wp.x.toFixed(1),
-      worldY: wp.y.toFixed(1),
-      units: this.units.length,
-      selected: this.selectedUnits.length,
-    });
+    if (this.verboseLogs) console.log('POINTER DOWN:', { button: pointer.button, worldX: wp.x.toFixed(1), worldY: wp.y.toFixed(1), units: this.units.length, selected: this.selectedUnits.length });
 
     if (isLeftClick) {
 
       if (this.placementMode) {
         if (!this.ghostValid) {
-          console.log('Cannot place building:', {
-            type: this.placementMode.type,
-            cost: this.placementMode.cost,
-            resources: this.playerResources,
-          });
+          if (this.verboseLogs) console.log('Cannot place building:', { type: this.placementMode.type, cost: this.placementMode.cost, resources: this.playerResources });
           return;
         }
 
         const cost = this.placementMode.cost || {};
 
         if (!this.spendCost(cost)) {
-          console.log(`Not enough resources for ${this.placementMode.label}. Cost: ${this.formatCost(cost)}`);
+          if (this.verboseLogs) console.log(`Not enough resources for ${this.placementMode.label}. Cost: ${this.formatCost(cost)}`);
           this.showFloatingMessage(`Need: ${this.formatCost(cost)}`);
+          this.addGameMessage(`Need ${this.formatCost(cost)}`, UI_STYLE.textWarn);
           return;
         }
 
@@ -1654,7 +1748,7 @@ class GameScene extends Phaser.Scene {
       this.deselectBuilding();
 
       const unit = this.getUnitAtPointer(pointer);
-      console.log('Clicked unit:', unit);
+      if (this.verboseLogs) console.log('Clicked unit:', unit);
 
       if (unit) {
         unit.selected = true;
@@ -1670,7 +1764,7 @@ class GameScene extends Phaser.Scene {
       }
 
       const entity = this.getEntityAtPointer(pointer);
-      if (entity) {
+      if (entity && this.verboseLogs) {
         let siteInfo = '';
         if (entity.depositId) {
           const site = this.resourceSites.find(s => s.id === entity.depositId);
@@ -1703,11 +1797,7 @@ class GameScene extends Phaser.Scene {
       }
 
       if (this.selectedUnits.length > 0) {
-        console.log('Move command:', {
-          selectedUnits: this.selectedUnits.length,
-          targetX: wp.x.toFixed(1),
-          targetY: wp.y.toFixed(1),
-        });
+        if (this.verboseLogs) console.log('Move command:', { selectedUnits: this.selectedUnits.length, targetX: wp.x.toFixed(1), targetY: wp.y.toFixed(1) });
 
         for (const unit of this.selectedUnits) {
           this.clearUnitWork(unit);
@@ -1763,7 +1853,8 @@ class GameScene extends Phaser.Scene {
       this.spawnStartingVillagers(building);
     }
 
-    console.log(`BUILD PLACED: ${type} at build (${buildX}, ${buildY}) px (${building.worldX}, ${building.worldY}) constructed:${building.constructed}`);
+    this.addGameMessage(`${def.label} placed`, UI_STYLE.textGood);
+    if (this.verboseLogs) console.log(`BUILD PLACED: ${type} at build (${buildX}, ${buildY}) px (${building.worldX}, ${building.worldY}) constructed:${building.constructed}`);
     return building;
   }
 
@@ -1840,6 +1931,9 @@ class GameScene extends Phaser.Scene {
   }
 
   cancelBuildingPlacement() {
+    if (this.placementMode) {
+      this.addGameMessage('Placement cancelled', UI_STYLE.textMuted);
+    }
     this.placementMode = null;
     this.placementGraphics.clear();
   }
@@ -1878,6 +1972,32 @@ class GameScene extends Phaser.Scene {
       }
     }
     return true;
+  }
+
+  getPlacementStatusText() {
+    if (!this.placementMode) return '';
+
+    const landValid = this.isBuildable(this.ghostBuildX, this.ghostBuildY, this.placementMode.w, this.placementMode.h);
+    const canAfford = this.canAffordCost(this.placementMode.cost || {});
+
+    if (!landValid) return 'Blocked';
+    if (!canAfford) return `Need ${this.formatCost(this.placementMode.cost || {})}`;
+    return 'Valid';
+  }
+
+  renderSelectedBuilding() {
+    this.selectedBuildingGraphics.clear();
+
+    if (!this.selectedBuilding) return;
+
+    const b = this.selectedBuilding;
+    const px = b.buildX * SCALE.BUILD_CELL_SIZE;
+    const py = b.buildY * SCALE.BUILD_CELL_SIZE;
+    const pw = b.footprintW * SCALE.BUILD_CELL_SIZE;
+    const ph = b.footprintH * SCALE.BUILD_CELL_SIZE;
+
+    this.selectedBuildingGraphics.lineStyle(3, 0x00ff00, 1);
+    this.selectedBuildingGraphics.strokeRect(px - 2, py - 2, pw + 4, ph + 4);
   }
 
   renderBuildingGhost() {
@@ -1961,6 +2081,7 @@ class GameScene extends Phaser.Scene {
     this.updateSelectedPanel();
     this.updateCommandPanel();
     this.updateActionPanel();
+    this.updateMessageLog();
 
     this.farmTickTimer += delta;
     if (this.farmTickTimer >= FARM_TICK_INTERVAL_MS) {
@@ -1978,6 +2099,7 @@ class GameScene extends Phaser.Scene {
         this.updateActionPanel();
         this.updateCommandPanel();
         this.showFloatingMessage(`+${producedFood} food`, this.scale.width / 2, 92, UI_STYLE.textGood);
+        this.addGameMessage(`+${producedFood} food from farms`, UI_STYLE.textGood);
       }
     }
 
@@ -1999,6 +2121,7 @@ class GameScene extends Phaser.Scene {
         const def = BUILDING_DEFS[b.type];
         if (def) {
           this.showFloatingMessage(`${def.label} complete`, this.scale.width / 2, 92, UI_STYLE.textGood);
+          this.addGameMessage(`${def.label} complete`, UI_STYLE.textGood);
         }
       }
     }
