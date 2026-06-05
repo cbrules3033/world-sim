@@ -159,11 +159,7 @@ class GameScene extends Phaser.Scene {
   }
 
   clearUnitWork(unit) {
-    unit.workState = 'idle';
-    unit.gatherTargetId = null;
-    unit.gatherResourceType = null;
-    unit.dropoffTargetId = null;
-    unit.gatherTimer = 0;
+    this.units.clearUnitWork(unit);
   }
 
   canAffordCost(cost = {}) {
@@ -228,6 +224,7 @@ class GameScene extends Phaser.Scene {
     this.pathfinding = new PathfindingSystem(this);
     this.resources = new ResourceSystem(this);
     this.buildings = new BuildingSystem(this);
+    this.units = new UnitSystem(this);
     this.ui = new UISystem(this);
 
     this.worldObjects = (this.worldObjects || []).concat([
@@ -430,25 +427,7 @@ class GameScene extends Phaser.Scene {
   }
 
   renderUnits() {
-    this.unitGraphics.clear();
-    this.selectionGraphics.clear();
-
-    for (const u of this.units) {
-      let fill = 0xffffcc;
-      if (u.workState === 'gathering') fill = 0x66ff66;
-      if (u.carryResource) fill = this.getCarryColor(u.carryResource);
-      if (u.selected) fill = 0xffffff;
-
-      this.unitGraphics.fillStyle(fill, 1);
-      this.unitGraphics.fillCircle(u.x, u.y, SCALE.UNIT_RADIUS_PX);
-      this.unitGraphics.lineStyle(1, 0x333333, 1);
-      this.unitGraphics.strokeCircle(u.x, u.y, SCALE.UNIT_RADIUS_PX);
-
-      if (u.selected) {
-        this.selectionGraphics.lineStyle(3, 0x00ff00, 1);
-        this.selectionGraphics.strokeCircle(u.x, u.y, SCALE.UNIT_SELECTION_RADIUS_PX + 4);
-      }
-    }
+    this.units.renderUnits();
   }
 
   setupCameras() {
@@ -1073,19 +1052,7 @@ class GameScene extends Phaser.Scene {
   }
 
   getUnitAtPointer(pointer = this.input.activePointer) {
-    const wp = this.getPointerWorldPx(pointer);
-    let closest = null;
-    let closestDist = SCALE.UNIT_SELECTION_RADIUS_PX + 8;
-    for (const u of this.units) {
-      const dx = u.x - wp.x;
-      const dy = u.y - wp.y;
-      const d = Math.sqrt(dx * dx + dy * dy);
-      if (d < closestDist) {
-        closest = u;
-        closestDist = d;
-      }
-    }
-    return closest;
+    return this.units.getUnitAtPointer(pointer);
   }
 
   onPointerDown(pointer) {
@@ -1186,10 +1153,7 @@ class GameScene extends Phaser.Scene {
   }
 
   clearUnitSelection() {
-    for (const u of this.units) {
-      u.selected = false;
-    }
-    this.selectedUnits = [];
+    this.units.clearUnitSelection();
   }
 
   placeBuilding(type, buildX, buildY) {
@@ -1247,54 +1211,7 @@ class GameScene extends Phaser.Scene {
   }
 
   updateUnits(delta) {
-    let anyMoved = false;
-
-    for (const u of this.units) {
-      if (u.state !== 'moving') continue;
-
-      if (!u.path || u.pathIndex >= u.path.length) {
-        u.state = 'idle';
-        u.path = [];
-        u.pathIndex = 0;
-        anyMoved = true;
-        continue;
-      }
-
-      const waypoint = u.path[u.pathIndex];
-
-      const dx = waypoint.x - u.x;
-      const dy = waypoint.y - u.y;
-      const dist = Math.sqrt(dx * dx + dy * dy);
-
-      if (dist < 2) {
-        u.x = waypoint.x;
-        u.y = waypoint.y;
-        u.pathIndex++;
-
-        if (u.pathIndex >= u.path.length) {
-          u.state = 'idle';
-          u.path = [];
-          u.pathIndex = 0;
-        }
-
-        anyMoved = true;
-        continue;
-      }
-
-      const step = (u.speed * delta) / 1000;
-      u.x += (dx / dist) * Math.min(step, dist);
-      u.y += (dy / dist) * Math.min(step, dist);
-      anyMoved = true;
-    }
-
-    for (const u of this.units) {
-      this.updateVillagerWork(u, delta);
-    }
-
-    if (anyMoved) {
-      this.renderUnits();
-      this.renderPaths();
-    }
+    this.units.updateUnits(delta);
   }
 
   update(time, delta) {
