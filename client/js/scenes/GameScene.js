@@ -540,25 +540,6 @@ class GameScene extends Phaser.Scene {
     }
   }
 
-  updateResourceHud() {
-    if (!this.resourceTexts) return;
-    this.populationUsed = this.units.filter(u => u.ownerId === this.playerId).length;
-
-    for (const [key, text] of Object.entries(this.resourceTexts)) {
-      if (key === 'population') {
-        text.setText(`Pop ${this.populationUsed}/${this.populationCap}`);
-      } else {
-        const label = key.charAt(0).toUpperCase() + key.slice(1);
-        text.setText(`${label} ${this.playerResources[key] || 0}`);
-      }
-    }
-  }
-
-  toggleDebug() {
-    this.debugVisible = !this.debugVisible;
-    this.debugPanel.visible = this.debugVisible;
-  }
-
   createCommandPanel() {
     const panelWidth = 620;
     const panelHeight = 112;
@@ -1012,25 +993,6 @@ class GameScene extends Phaser.Scene {
 
   pointInRect(px, py, x, y, w, h) {
     return px >= x && px <= x + w && py >= y && py <= y + h;
-  }
-
-  isPointerOverUI(pointer) {
-    const x = pointer.x;
-    const y = pointer.y;
-
-    if (this.pointInRect(x, y, 12, 10, 744, 34)) return true;
-
-    if (this.pointInRect(x, y, this.scale.width - 360, 8, 350, 24)) return true;
-
-    if (this.pointInRect(x, y, 12, this.scale.height - 124, 260, 112)) return true;
-
-    if (this.pointInRect(x, y, Math.floor((this.scale.width - 620) / 2), this.scale.height - 124, 620, 112)) return true;
-
-    if (this.pointInRect(x, y, this.scale.width - 272, this.scale.height - 124, 260, 112)) return true;
-
-    if (this.debugVisible && this.pointInRect(x, y, this.scale.width - 372, 50, 360, 270)) return true;
-
-    return false;
   }
 
   getEntityAtPointer(pointer = this.input.activePointer) {
