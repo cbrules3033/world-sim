@@ -11,6 +11,16 @@ class UnitSystem {
     unit.gatherTimer = 0;
   }
 
+  stopUnit(unit) {
+    unit.state = 'idle';
+    unit.path = [];
+    unit.pathIndex = 0;
+    unit.targetX = unit.x;
+    unit.targetY = unit.y;
+    unit.stuckTimer = 0;
+    unit.lastProgressDist = Infinity;
+  }
+
   getUnitAtPointer(pointer = this.scene.input.activePointer) {
     const scene = this.scene;
     const wp = scene.getPointerWorldPx(pointer);
@@ -92,7 +102,17 @@ class UnitSystem {
 
   applyUnitSeparation() {
     const scene = this.scene;
-    const units = scene.units.filter(u => u.ownerId === scene.playerId);
+    const units = scene.units.filter(u => {
+      if (u.ownerId !== scene.playerId) return false;
+      if (
+        u.workState === 'gathering' ||
+        u.workState === 'moving_to_resource' ||
+        u.workState === 'moving_to_dropoff'
+      ) {
+        return false;
+      }
+      return true;
+    });
 
     const pushes = new Map();
 
@@ -146,6 +166,21 @@ class UnitSystem {
       const push = pushes.get(unit.id);
       if (!push) continue;
 
+      const currentCell = scene.worldPxToBuildCell(unit.x, unit.y);
+
+      if (!scene.isCellPathable(currentCell.x, currentCell.y)) {
+        const nearby = scene.findNearestPathableCell(currentCell.x, currentCell.y, 4);
+
+        if (nearby) {
+          const wp = scene.buildCellToWorldPx(nearby.x, nearby.y);
+          unit.x = wp.x;
+          unit.y = wp.y;
+          moved = true;
+        }
+
+        continue;
+      }
+
       const clamped = this.clampPush(push.x, push.y);
 
       if (Math.abs(clamped.x) < 0.01 && Math.abs(clamped.y) < 0.01) continue;
@@ -169,11 +204,69 @@ class UnitSystem {
     return moved;
   }
 
+  getRemainingPathDistance(unit) {
+    if (!unit.path || unit.pathIndex >= unit.path.length) return 0;
+
+    let total = 0;
+    let px = unit.x;
+    let py = unit.y;
+
+    for (let i = unit.pathIndex; i < unit.path.length; i++) {
+      const wp = unit.path[i];
+      const dx = wp.x - px;
+      const dy = wp.y - py;
+      total += Math.sqrt(dx * dx + dy * dy);
+      px = wp.x;
+      py = wp.y;
+    }
+
+    return total;
+  }
+
+  tryRecoverStuckUnit(unit) {
+    const scene = this.scene;
+
+    unit.stuckTimer = 0;
+    unit.lastProgressDist = Infinity;
+
+    if (unit.path && unit.path.length > 0) {
+      const final = unit.path[unit.path.length - 1];
+      const ok = scene.commandMoveUnit(unit, final.x, final.y);
+
+      if (ok !== false) {
+        if (scene.verboseLogs) console.log('Recovered stuck unit by repathing:', unit.id);
+        return;
+      }
+    }
+
+    const current = scene.worldPxToBuildCell(unit.x, unit.y);
+    const nearby = scene.findNearestPathableCell(current.x, current.y, 4);
+
+    if (nearby) {
+      const wp = scene.buildCellToWorldPx(nearby.x, nearby.y);
+      unit.x = wp.x;
+      unit.y = wp.y;
+      this.stopUnit(unit);
+
+      if (scene.verboseLogs) console.log('Recovered stuck unit by nudging:', unit.id);
+      return;
+    }
+
+    this.stopUnit(unit);
+
+    if (scene.verboseLogs) console.log('Stopped stuck unit:', unit.id);
+  }
+
   commandMoveSelectedUnits(targetX, targetY) {
     const scene = this.scene;
     const selected = scene.selectedUnits || [];
 
     if (selected.length === 0) return;
+
+    for (const unit of selected) {
+      unit.stuckTimer = 0;
+      unit.lastProgressDist = Infinity;
+    }
 
     if (selected.length === 1) {
       scene.clearUnitWork(selected[0]);
@@ -223,6 +316,22 @@ class UnitSystem {
       }
 
       const waypoint = u.path[u.pathIndex];
+
+      const remaining = this.getRemainingPathDistance(u);
+
+      if (u.lastProgressDist !== Infinity && remaining >= u.lastProgressDist - 0.2) {
+        u.stuckTimer = (u.stuckTimer || 0) + delta;
+      } else {
+        u.stuckTimer = 0;
+      }
+
+      u.lastProgressDist = remaining;
+
+      if (u.stuckTimer > 900) {
+        this.tryRecoverStuckUnit(u);
+        anyMoved = true;
+        continue;
+      }
 
       const dx = waypoint.x - u.x;
       const dy = waypoint.y - u.y;

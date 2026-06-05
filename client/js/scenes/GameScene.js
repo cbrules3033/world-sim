@@ -147,7 +147,7 @@ class GameScene extends Phaser.Scene {
   }
 
   commandMoveUnit(unit, targetWorldX, targetWorldY) {
-    this.pathfindingSystem.commandMoveUnit(unit, targetWorldX, targetWorldY);
+    return this.pathfindingSystem.commandMoveUnit(unit, targetWorldX, targetWorldY);
   }
 
   commandMoveSelectedUnits(targetX, targetY) {

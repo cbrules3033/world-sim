@@ -158,7 +158,8 @@ class PathfindingSystem {
       finalGoal = this.findNearestPathableCell(goal.x, goal.y, 12);
       if (!finalGoal) {
         console.warn('No pathable target near clicked location');
-        return;
+        this.scene.unitSystem?.stopUnit(unit);
+        return false;
       }
     }
 
@@ -166,7 +167,8 @@ class PathfindingSystem {
 
     if (!path || path.length === 0) {
       console.warn('No path found', { start, finalGoal });
-      return;
+      this.scene.unitSystem?.stopUnit(unit);
+      return false;
     }
 
     const simplified = this.simplifyPath(path);
@@ -179,5 +181,7 @@ class PathfindingSystem {
     const first = waypoints[0];
     unit.targetX = first.x;
     unit.targetY = first.y;
+
+    return true;
   }
 }
