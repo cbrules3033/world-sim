@@ -52,11 +52,159 @@ class UnitSystem {
       scene.unitGraphics.lineStyle(1, 0x333333, 1);
       scene.unitGraphics.strokeCircle(u.x, u.y, SCALE.UNIT_RADIUS_PX);
 
+      if (scene.showUnitCollision) {
+        scene.unitGraphics.lineStyle(1, 0x00ffff, 0.25);
+        scene.unitGraphics.strokeCircle(u.x, u.y, UNIT_COLLISION.SEPARATION_RADIUS);
+      }
+
       if (u.selected) {
         scene.selectionGraphics.lineStyle(3, 0x00ff00, 1);
         scene.selectionGraphics.strokeCircle(u.x, u.y, SCALE.UNIT_SELECTION_RADIUS_PX + 4);
       }
     }
+  }
+
+  getDistance(a, b) {
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    return Math.sqrt(dx * dx + dy * dy);
+  }
+
+  isWorldPointPathable(x, y) {
+    const scene = this.scene;
+    const cell = scene.worldPxToBuildCell(x, y);
+    return scene.isCellPathable(cell.x, cell.y);
+  }
+
+  clampPush(pushX, pushY) {
+    const max = UNIT_COLLISION.MAX_PUSH_PER_FRAME;
+    const len = Math.sqrt(pushX * pushX + pushY * pushY);
+
+    if (len <= max || len === 0) {
+      return { x: pushX, y: pushY };
+    }
+
+    return {
+      x: (pushX / len) * max,
+      y: (pushY / len) * max,
+    };
+  }
+
+  applyUnitSeparation() {
+    const scene = this.scene;
+    const units = scene.units.filter(u => u.ownerId === scene.playerId);
+
+    const pushes = new Map();
+
+    for (const unit of units) {
+      pushes.set(unit.id, { x: 0, y: 0 });
+    }
+
+    for (let i = 0; i < units.length; i++) {
+      for (let j = i + 1; j < units.length; j++) {
+        const a = units[i];
+        const b = units[j];
+
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        const distSq = dx * dx + dy * dy;
+
+        if (distSq === 0) {
+          const pa = pushes.get(a.id);
+          const pb = pushes.get(b.id);
+
+          pa.x -= 0.5;
+          pb.x += 0.5;
+          continue;
+        }
+
+        const dist = Math.sqrt(distSq);
+        const minDist = UNIT_COLLISION.SEPARATION_RADIUS;
+
+        if (dist >= minDist) continue;
+
+        const overlap = minDist - dist;
+        const nx = dx / dist;
+        const ny = dy / dist;
+
+        const push = overlap * UNIT_COLLISION.SEPARATION_STRENGTH * 0.5;
+
+        const pa = pushes.get(a.id);
+        const pb = pushes.get(b.id);
+
+        pa.x -= nx * push;
+        pa.y -= ny * push;
+
+        pb.x += nx * push;
+        pb.y += ny * push;
+      }
+    }
+
+    let moved = false;
+
+    for (const unit of units) {
+      const push = pushes.get(unit.id);
+      if (!push) continue;
+
+      const clamped = this.clampPush(push.x, push.y);
+
+      if (Math.abs(clamped.x) < 0.01 && Math.abs(clamped.y) < 0.01) continue;
+
+      const nextX = unit.x + clamped.x;
+      const nextY = unit.y + clamped.y;
+
+      if (this.isWorldPointPathable(nextX, nextY)) {
+        unit.x = nextX;
+        unit.y = nextY;
+        moved = true;
+      } else if (this.isWorldPointPathable(unit.x + clamped.x, unit.y)) {
+        unit.x += clamped.x;
+        moved = true;
+      } else if (this.isWorldPointPathable(unit.x, unit.y + clamped.y)) {
+        unit.y += clamped.y;
+        moved = true;
+      }
+    }
+
+    return moved;
+  }
+
+  commandMoveSelectedUnits(targetX, targetY) {
+    const scene = this.scene;
+    const selected = scene.selectedUnits || [];
+
+    if (selected.length === 0) return;
+
+    if (selected.length === 1) {
+      scene.clearUnitWork(selected[0]);
+      scene.commandMoveUnit(selected[0], targetX, targetY);
+      return;
+    }
+
+    const spacing = UNIT_COLLISION.SEPARATION_RADIUS;
+    const cols = Math.ceil(Math.sqrt(selected.length));
+
+    selected.forEach((unit, index) => {
+      const row = Math.floor(index / cols);
+      const col = index % cols;
+
+      const offsetX = (col - (cols - 1) / 2) * spacing;
+      const offsetY = (row - (cols - 1) / 2) * spacing;
+
+      const destX = targetX + offsetX;
+      const destY = targetY + offsetY;
+
+      const cell = scene.worldPxToBuildCell(destX, destY);
+
+      if (!scene.isCellPathable(cell.x, cell.y)) {
+        scene.clearUnitWork(unit);
+        scene.commandMoveUnit(unit, targetX, targetY);
+        return;
+      }
+
+      scene.clearUnitWork(unit);
+      scene.commandMoveUnit(unit, destX, destY);
+    });
   }
 
   updateUnits(delta) {
@@ -105,7 +253,9 @@ class UnitSystem {
       scene.updateVillagerWork(u, delta);
     }
 
-    if (anyMoved) {
+    const separated = this.applyUnitSeparation();
+
+    if (anyMoved || separated) {
       this.renderUnits();
       scene.renderPaths();
     }

@@ -150,6 +150,10 @@ class GameScene extends Phaser.Scene {
     this.pathfindingSystem.commandMoveUnit(unit, targetWorldX, targetWorldY);
   }
 
+  commandMoveSelectedUnits(targetX, targetY) {
+    this.unitSystem.commandMoveSelectedUnits(targetX, targetY);
+  }
+
   renderPaths() {
     this.pathGraphics.clear();
 
@@ -234,6 +238,7 @@ class GameScene extends Phaser.Scene {
     this.showSiteBounds = false;
     this.showEntityIcons = true;
     this.showTerrainGrid = false;
+    this.showUnitCollision = false;
     this.placementMode = null;
     this.ghostBuildX = 0;
     this.ghostBuildY = 0;
@@ -286,6 +291,11 @@ class GameScene extends Phaser.Scene {
     this.input.keyboard.on('keydown-BACKTICK', () => this.toggleDebug());
     this.input.keyboard.on('keydown-ONE', () => { this.showSiteBounds = !this.showSiteBounds; this.renderSiteBounds(); });
     this.input.keyboard.on('keydown-TWO', () => { this.showEntityIcons = !this.showEntityIcons; this.renderEntities(); });
+    this.input.keyboard.on('keydown-THREE', () => {
+      this.showUnitCollision = !this.showUnitCollision;
+      this.renderUnits();
+      this.addGameMessage(`Collision overlay ${this.showUnitCollision ? 'on' : 'off'}`, UI_STYLE.textMuted);
+    });
 
     for (const [key, def] of Object.entries(BUILDING_DEFS)) {
       this.input.keyboard.on(`keydown-${def.hotkey}`, () => this.startBuildingPlacement(key));
@@ -737,10 +747,7 @@ class GameScene extends Phaser.Scene {
       if (this.selectedUnits.length > 0) {
         if (this.verboseLogs) console.log('Move command:', { selectedUnits: this.selectedUnits.length, targetX: wp.x.toFixed(1), targetY: wp.y.toFixed(1) });
 
-        for (const unit of this.selectedUnits) {
-          this.clearUnitWork(unit);
-          this.commandMoveUnit(unit, wp.x, wp.y);
-        }
+        this.commandMoveSelectedUnits(wp.x, wp.y);
 
         this.renderUnits();
         this.renderPaths();

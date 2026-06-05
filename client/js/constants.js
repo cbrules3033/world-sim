@@ -80,6 +80,13 @@ const VILLAGER_COST = {
 const FOOD_PER_FARM_TICK = 2;
 const FARM_TICK_INTERVAL_MS = 3000;
 
+const UNIT_COLLISION = {
+  RADIUS: 7,
+  SEPARATION_RADIUS: 16,
+  SEPARATION_STRENGTH: 0.45,
+  MAX_PUSH_PER_FRAME: 2.5,
+};
+
 const UI_STYLE = {
   panelBg: 0x101418,
   panelBgAlpha: 0.82,

@@ -519,7 +519,7 @@ class UISystem {
     this.hotkeyHelpText = scene.registerUIObject(scene.add.text(
       scene.scale.width - 12,
       12,
-      '` Debug   . Idle   RMB Move/Gather   Drag Select   Shift+Click   Esc Clear   Tab Grid',
+      '` Debug   . Idle   RMB Move/Gather   Drag Select   Shift+Click   3 Collision   Esc Clear   Tab Grid',
       {
         fontSize: '11px',
         color: UI_STYLE.textMuted,
