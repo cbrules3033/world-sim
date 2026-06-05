@@ -81,12 +81,21 @@ const FOOD_PER_FARM_TICK = 2;
 const FARM_TICK_INTERVAL_MS = 3000;
 
 const UI_STYLE = {
-  panelBg: 0x000000,
-  panelAlpha: 0.75,
-  textColor: '#ffffff',
-  disabledColor: '#666666',
-  buttonBg: 0x3a3a3a,
-  buttonHover: 0x5a5a5a,
-  buttonDisabled: 0x222222,
-  accentColor: '#ffcc00',
+  panelBg: 0x101418,
+  panelBgAlpha: 0.82,
+  panelBorder: 0x4a5568,
+  panelAccent: 0xd6b36a,
+
+  textPrimary: '#f5f0dc',
+  textMuted: '#a8b0b8',
+  textGood: '#80ff9f',
+  textWarn: '#ffcc66',
+  textBad: '#ff6666',
+
+  buttonBg: 0x202833,
+  buttonBgHover: 0x2d3a4a,
+  buttonBgDisabled: 0x1a1a1a,
+  buttonBorder: 0x5c6b7a,
+
+  fontFamily: 'monospace',
 };

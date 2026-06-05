@@ -435,23 +435,29 @@ class GameScene extends Phaser.Scene {
   formatCost(cost = {}) {
     const parts = [];
     for (const [resource, amount] of Object.entries(cost)) {
-      parts.push(`${resource}:${amount}`);
+      parts.push(`${amount}${resource[0]}`);
     }
     return parts.length > 0 ? parts.join(' ') : 'free';
   }
 
-  showFloatingMessage(text, x = 20, y = 90, color = '#ffcc00') {
+  showFloatingMessage(text, x = this.scale.width / 2, y = 58, color = '#ffcc00') {
     const msg = this.add.text(x, y, text, {
-      fontSize: '14px', color, fontFamily: 'monospace',
-      backgroundColor: '#000000aa', padding: { x: 6, y: 4 },
+      fontSize: '14px',
+      color,
+      fontFamily: UI_STYLE.fontFamily,
+      backgroundColor: '#000000cc',
+      padding: { x: 10, y: 6 },
     });
+
+    msg.setOrigin(0.5, 0);
     msg.setScrollFactor(0);
-    msg.setDepth(300);
+    msg.setDepth(400);
+
     this.tweens.add({
       targets: msg,
       alpha: 0,
-      y: y - 20,
-      duration: 1200,
+      y: y - 18,
+      duration: 1300,
       onComplete: () => msg.destroy(),
     });
   }
@@ -687,13 +693,15 @@ class GameScene extends Phaser.Scene {
     this.unitGraphics = this.add.graphics().setDepth(30);
     this.selectionGraphics = this.add.graphics().setDepth(40);
 
-    this.debugVisible = true;
+    this.debugVisible = false;
     this.showSiteBounds = false;
     this.showEntityIcons = true;
     this.placementMode = null;
     this.ghostBuildX = 0;
     this.ghostBuildY = 0;
     this.ghostValid = false;
+
+    this.selectedBuilding = null;
 
     this.renderTerrain();
     this.renderEntities();
@@ -702,7 +710,6 @@ class GameScene extends Phaser.Scene {
 
     this.setupCamera();
     this.createUI();
-    this.createCommandPanel();
 
     this.input.mouse.disableContextMenu();
 
@@ -714,6 +721,11 @@ class GameScene extends Phaser.Scene {
       this.input.keyboard.on(`keydown-${def.hotkey}`, () => this.startBuildingPlacement(key));
     }
     this.input.keyboard.on('keydown-ESC', () => this.cancelBuildingPlacement());
+    this.input.keyboard.on('keydown-R', () => {
+      if (this.selectedBuilding && this.selectedBuilding.type === 'town_center' && this.selectedBuilding.constructed) {
+        this.trainVillager(this.selectedBuilding);
+      }
+    });
 
     this.input.keyboard.on('keydown-F', () => this.jumpToFirstSite('forest'));
     this.input.keyboard.on('keydown-C', () => this.jumpToFirstResource('copper'));
@@ -914,42 +926,69 @@ class GameScene extends Phaser.Scene {
   }
 
   createUI() {
-    this.resourceHud = this.add.container(10, 10);
+    this.createResourceHud();
+    this.createSelectedPanel();
+    this.createCommandPanel();
+    this.createDebugPanel();
+    this.createHotkeyHelp();
+    this.layoutUI();
+
+    this.scale.on('resize', () => {
+      this.layoutUI();
+    });
+  }
+
+  createResourceHud() {
+    this.resourceHud = this.add.container(12, 10);
     this.resourceHud.setScrollFactor(0);
     this.resourceHud.setDepth(200);
 
-    const hudBg = this.add.rectangle(0, 0, 360, 34, 0x000000, 0.65).setOrigin(0, 0);
-    this.resourceHudText = this.add.text(10, 8, '', {
-      fontSize: '14px', color: '#ffffff', fontFamily: 'monospace',
-    });
-    this.resourceHud.add([hudBg, this.resourceHudText]);
+    this.resourceTexts = {};
 
-    this.debugPanel = this.add.container(10, 50);
-    this.debugPanel.setScrollFactor(0);
-    this.debugPanel.setDepth(100);
+    const resources = [
+      { key: 'food', label: 'Food', color: 0x80ff9f },
+      { key: 'wood', label: 'Wood', color: 0xc49a5a },
+      { key: 'stone', label: 'Stone', color: 0xaaaaaa },
+      { key: 'copper', label: 'Copper', color: 0xcd7f32 },
+      { key: 'iron', label: 'Iron', color: 0x777777 },
+    ];
 
-    const bg = this.add.rectangle(0, 0, 360, 270, 0x000000, 0.7).setOrigin(0, 0);
-    this.debugText = this.add.text(10, 10, '', {
-      fontSize: '11px', color: '#0f0', fontFamily: 'monospace', lineSpacing: 3, wordWrap: { width: 340 }
-    });
-    this.debugPanel.add([bg, this.debugText]);
-    this.debugPanel.visible = this.debugVisible;
+    let x = 0;
 
-    const hotkeyList = Object.values(BUILDING_DEFS).map(d => `${d.hotkey}:${d.label.split(' ')[0]}`).join('  ');
-    this.add.text(10, this.scale.height - 95,
-      '` : Debug  |  1 : Bounds  |  2 : Entities\n' +
-      `${hotkeyList}\n` +
-      'F:Forest  O:Stone  C:Copper  I:Iron  | ESC:Cancel', {
-      fontSize: '11px', color: '#555', fontFamily: 'monospace'
-    }).setScrollFactor(0).setDepth(100);
+    for (const res of resources) {
+      const chip = this.add.container(x, 0);
+
+      const bg = this.add.rectangle(0, 0, 118, 32, UI_STYLE.panelBg, UI_STYLE.panelBgAlpha)
+        .setOrigin(0, 0);
+
+      const border = this.add.rectangle(0, 0, 118, 32)
+        .setOrigin(0, 0)
+        .setStrokeStyle(1, UI_STYLE.panelBorder, 0.8);
+
+      const dot = this.add.circle(14, 16, 5, res.color, 1);
+
+      const text = this.add.text(26, 8, `${res.label}: 0`, {
+        fontSize: '13px',
+        color: UI_STYLE.textPrimary,
+        fontFamily: UI_STYLE.fontFamily,
+      });
+
+      chip.add([bg, border, dot, text]);
+      this.resourceHud.add(chip);
+
+      this.resourceTexts[res.key] = text;
+      x += 124;
+    }
   }
 
   updateResourceHud() {
-    if (!this.resourceHudText) return;
+    if (!this.resourceTexts) return;
     this.populationUsed = this.units.filter(u => u.ownerId === this.playerId).length;
-    this.resourceHudText.setText(
-      `Pop: ${this.populationUsed}/${this.populationCap}  |  Food: ${this.playerResources.food}  Wood: ${this.playerResources.wood}  Stone: ${this.playerResources.stone}  Copper: ${this.playerResources.copper}  Iron: ${this.playerResources.iron}`
-    );
+
+    for (const [key, text] of Object.entries(this.resourceTexts)) {
+      const label = key.charAt(0).toUpperCase() + key.slice(1);
+      text.setText(`${label}: ${this.playerResources[key] || 0}`);
+    }
   }
 
   toggleDebug() {
@@ -958,84 +997,244 @@ class GameScene extends Phaser.Scene {
   }
 
   createCommandPanel() {
-    const panelH = 70;
-    const panelY = this.scale.height - panelH;
+    const panelWidth = 620;
+    const panelHeight = 112;
+    const x = Math.floor((this.scale.width - panelWidth) / 2);
+    const y = this.scale.height - panelHeight - 12;
 
-    this.commandPanelContainer = this.add.container(0, panelY);
-    this.commandPanelContainer.setScrollFactor(0);
-    this.commandPanelContainer.setDepth(200);
-    this.commandPanelContainer.visible = false;
+    this.commandPanel = this.add.container(x, y);
+    this.commandPanel.setScrollFactor(0);
+    this.commandPanel.setDepth(200);
 
-    this.commandPanelBg = this.add.rectangle(
-      this.scale.width / 2, panelH / 2,
-      this.scale.width, panelH,
-      UI_STYLE.panelBg, UI_STYLE.panelAlpha
-    ).setOrigin(0.5, 0.5);
+    const bg = this.add.rectangle(0, 0, panelWidth, panelHeight, UI_STYLE.panelBg, UI_STYLE.panelBgAlpha)
+      .setOrigin(0, 0);
 
-    this.commandPanelTitle = this.add.text(12, 8, '', {
-      fontSize: '13px', color: UI_STYLE.accentColor, fontFamily: 'monospace', fontStyle: 'bold',
+    const border = this.add.rectangle(0, 0, panelWidth, panelHeight)
+      .setOrigin(0, 0)
+      .setStrokeStyle(1, UI_STYLE.panelBorder, 0.9);
+
+    const title = this.add.text(12, 8, 'Build', {
+      fontSize: '14px',
+      color: UI_STYLE.textPrimary,
+      fontFamily: UI_STYLE.fontFamily,
     });
 
-    this.commandPanelButtons = [];
+    this.commandPanel.add([bg, border, title]);
 
-    this.commandPanelContainer.add([this.commandPanelBg, this.commandPanelTitle]);
-  }
+    this.buildButtons = [];
 
-  showCommandPanel(building) {
-    if (!this.commandPanelContainer) return;
+    const entries = Object.entries(BUILDING_DEFS);
 
-    for (const child of this.commandPanelButtons) {
-      child.destroy();
-    }
-    this.commandPanelButtons = [];
+    entries.forEach(([type, def], index) => {
+      const col = index % 3;
+      const row = Math.floor(index / 3);
 
-    this.commandPanelContainer.visible = true;
-    this.commandPanelTitle.setText((BUILDING_DEFS[building.type]?.label || building.type) + (building.constructed ? '' : ' (building)'));
+      const bx = 12 + col * 198;
+      const by = 32 + row * 34;
 
-    if (building.constructed && building.type === 'town_center') {
-      this.addCommandButton('Train Villager', VILLAGER_COST, () => this.trainVillager(building));
-    }
-  }
-
-  addCommandButton(label, cost, callback) {
-    const x = this.commandPanelButtons.length * 160 + 12;
-    const y = 30;
-    const w = 150;
-    const h = 30;
-
-    const canAfford = this.canAffordCost(cost);
-    const bgColor = canAfford ? UI_STYLE.buttonBg : UI_STYLE.buttonDisabled;
-    const textColor = canAfford ? UI_STYLE.textColor : UI_STYLE.disabledColor;
-
-    const costStr = Object.entries(cost).map(([r, a]) => `${a}${r[0]}`).join(' ');
-
-    const bg = this.add.rectangle(x, y, w, h, bgColor, 1).setOrigin(0, 0);
-    bg.setInteractive({ useHandCursor: canAfford });
-
-    if (canAfford) {
-      bg.on('pointerover', () => bg.setFillStyle(UI_STYLE.buttonHover));
-      bg.on('pointerout', () => bg.setFillStyle(UI_STYLE.buttonBg));
-      bg.on('pointerdown', callback);
-    }
-
-    const txt = this.add.text(x + 4, y + 2, label, {
-      fontSize: '11px', color: textColor, fontFamily: 'monospace',
+      const button = this.createBuildButton(type, def, bx, by);
+      this.commandPanel.add(button.container);
+      this.buildButtons.push(button);
     });
-    const costTxt = this.add.text(x + 4, y + 15, costStr, {
-      fontSize: '9px', color: canAfford ? '#aaa' : UI_STYLE.disabledColor, fontFamily: 'monospace',
+  }
+
+  createBuildButton(type, def, x, y) {
+    const container = this.add.container(x, y);
+
+    const bg = this.add.rectangle(0, 0, 186, 28, UI_STYLE.buttonBg, 0.95)
+      .setOrigin(0, 0)
+      .setInteractive({ useHandCursor: true });
+
+    const border = this.add.rectangle(0, 0, 186, 28)
+      .setOrigin(0, 0)
+      .setStrokeStyle(1, UI_STYLE.buttonBorder, 0.8);
+
+    const label = this.add.text(8, 6, '', {
+      fontSize: '11px',
+      color: UI_STYLE.textPrimary,
+      fontFamily: UI_STYLE.fontFamily,
     });
 
-    this.commandPanelButtons.push(bg, txt, costTxt);
-    this.commandPanelContainer.add([bg, txt, costTxt]);
+    container.add([bg, border, label]);
+
+    bg.on('pointerdown', () => {
+      this.startBuildingPlacement(type);
+    });
+
+    bg.on('pointerover', () => {
+      bg.setFillStyle(UI_STYLE.buttonBgHover, 1);
+    });
+
+    bg.on('pointerout', () => {
+      bg.setFillStyle(UI_STYLE.buttonBg, 0.95);
+    });
+
+    return { type, def, container, bg, border, label };
   }
 
-  hideCommandPanel() {
-    if (!this.commandPanelContainer) return;
-    this.commandPanelContainer.visible = false;
-    for (const child of this.commandPanelButtons) {
-      child.destroy();
+  updateCommandPanel() {
+    if (!this.buildButtons) return;
+
+    for (const button of this.buildButtons) {
+      const cost = button.def.cost || {};
+      const canAfford = this.canAffordCost(cost);
+
+      const hotkey = button.def.hotkey;
+      const name = button.def.label;
+      const costText = this.formatCost(cost);
+
+      button.label.setText(`${hotkey} ${name} - ${costText}`);
+
+      if (canAfford) {
+        button.bg.setFillStyle(UI_STYLE.buttonBg, 0.95);
+        button.label.setColor(UI_STYLE.textPrimary);
+        button.border.setStrokeStyle(1, UI_STYLE.buttonBorder, 0.8);
+      } else {
+        button.bg.setFillStyle(UI_STYLE.buttonBgDisabled, 0.9);
+        button.label.setColor(UI_STYLE.textMuted);
+        button.border.setStrokeStyle(1, 0x333333, 0.6);
+      }
     }
-    this.commandPanelButtons = [];
+  }
+
+  createSelectedPanel() {
+    const panelWidth = 260;
+    const panelHeight = 112;
+    const x = 12;
+    const y = this.scale.height - panelHeight - 12;
+
+    this.selectedPanel = this.add.container(x, y);
+    this.selectedPanel.setScrollFactor(0);
+    this.selectedPanel.setDepth(200);
+
+    const bg = this.add.rectangle(0, 0, panelWidth, panelHeight, UI_STYLE.panelBg, UI_STYLE.panelBgAlpha)
+      .setOrigin(0, 0);
+
+    const border = this.add.rectangle(0, 0, panelWidth, panelHeight)
+      .setOrigin(0, 0)
+      .setStrokeStyle(1, UI_STYLE.panelBorder, 0.9);
+
+    this.selectedTitleText = this.add.text(12, 10, 'No selection', {
+      fontSize: '15px',
+      color: UI_STYLE.textPrimary,
+      fontFamily: UI_STYLE.fontFamily,
+    });
+
+    this.selectedBodyText = this.add.text(12, 34, 'Select a villager or building', {
+      fontSize: '12px',
+      color: UI_STYLE.textMuted,
+      fontFamily: UI_STYLE.fontFamily,
+      lineSpacing: 4,
+    });
+
+    this.selectedPanel.add([bg, border, this.selectedTitleText, this.selectedBodyText]);
+  }
+
+  updateSelectedPanel() {
+    if (!this.selectedTitleText || !this.selectedBodyText) return;
+
+    if (this.selectedBuilding) {
+      const b = this.selectedBuilding;
+      this.selectedTitleText.setText(BUILDING_DEFS[b.type]?.label || b.type);
+      const lines = [`State: ${b.constructed ? 'Active' : 'Building...'}`];
+      if (b.constructed && b.type === 'town_center') {
+        lines.push('', 'R - Train Villager (50 food)');
+      }
+      this.selectedBodyText.setText(lines.join('\n'));
+      return;
+    }
+
+    if (!this.selectedUnits || this.selectedUnits.length === 0) {
+      this.selectedTitleText.setText('No selection');
+      this.selectedBodyText.setText('Select a villager or building');
+      return;
+    }
+
+    if (this.selectedUnits.length > 1) {
+      this.selectedTitleText.setText(`${this.selectedUnits.length} units selected`);
+      this.selectedBodyText.setText('Right-click to move or gather');
+      return;
+    }
+
+    const u = this.selectedUnits[0];
+
+    const carryLine = u.carryAmount > 0
+      ? `Carry: ${u.carryAmount}/${u.carryCapacity} ${u.carryResource || ''}`
+      : `Carry: 0/${u.carryCapacity || 0}`;
+
+    const jobLine = u.gatherResourceType
+      ? `Job: ${u.workState} ${u.gatherResourceType}`
+      : `Job: ${u.workState || 'idle'}`;
+
+    this.selectedTitleText.setText(u.type === 'villager' ? 'Villager' : u.type);
+
+    this.selectedBodyText.setText([
+      `Move: ${u.state || 'idle'}`,
+      jobLine,
+      carryLine,
+      `HP: ${u.hp || '—'}`,
+    ].join('\n'));
+  }
+
+  createDebugPanel() {
+    const panelWidth = 360;
+    const panelHeight = 270;
+
+    this.debugPanel = this.add.container(this.scale.width - panelWidth - 12, 50);
+    this.debugPanel.setScrollFactor(0);
+    this.debugPanel.setDepth(250);
+
+    const bg = this.add.rectangle(0, 0, panelWidth, panelHeight, 0x000000, 0.75)
+      .setOrigin(0, 0);
+
+    this.debugText = this.add.text(10, 10, '', {
+      fontSize: '11px',
+      color: '#00ff66',
+      fontFamily: UI_STYLE.fontFamily,
+      lineSpacing: 3,
+      wordWrap: { width: panelWidth - 20 },
+    });
+
+    this.debugPanel.add([bg, this.debugText]);
+    this.debugPanel.visible = this.debugVisible;
+  }
+
+  createHotkeyHelp() {
+    this.hotkeyHelpText = this.add.text(
+      this.scale.width - 12,
+      12,
+      '` Debug   RMB Move/Gather   Wheel Zoom   Drag Pan',
+      {
+        fontSize: '11px',
+        color: UI_STYLE.textMuted,
+        fontFamily: UI_STYLE.fontFamily,
+      }
+    );
+
+    this.hotkeyHelpText.setOrigin(1, 0);
+    this.hotkeyHelpText.setScrollFactor(0);
+    this.hotkeyHelpText.setDepth(200);
+  }
+
+  layoutUI() {
+    if (this.selectedPanel) {
+      this.selectedPanel.setPosition(12, this.scale.height - 124);
+    }
+
+    if (this.commandPanel) {
+      this.commandPanel.setPosition(
+        Math.floor((this.scale.width - 620) / 2),
+        this.scale.height - 124
+      );
+    }
+
+    if (this.hotkeyHelpText) {
+      this.hotkeyHelpText.setPosition(this.scale.width - 12, 12);
+    }
+
+    if (this.debugPanel) {
+      this.debugPanel.setPosition(this.scale.width - 372, 50);
+    }
   }
 
   getBuildingAtPointer(pointer) {
@@ -1063,13 +1262,11 @@ class GameScene extends Phaser.Scene {
 
   selectBuilding(building) {
     this.selectedBuilding = building;
-    this.showCommandPanel(building);
     console.log('Building selected:', building.type, building.id);
   }
 
   deselectBuilding() {
     this.selectedBuilding = null;
-    this.hideCommandPanel();
   }
 
   trainVillager(building) {
@@ -1137,15 +1334,22 @@ class GameScene extends Phaser.Scene {
 
     this.units.push(villager);
     this.renderUnits();
-    this.showFloatingMessage('Villager trained!', 20, 90, '#00ff00');
+    this.showFloatingMessage('Villager trained!', this.scale.width / 2, 58, UI_STYLE.textGood);
     console.log('Villager trained at:', building.id, { x: px, y: py });
   }
 
   isPointerOverUI(pointer) {
-    if (this.commandPanelContainer && this.commandPanelContainer.visible) {
-      const panelY = this.scale.height - 70;
-      if (pointer.y >= panelY) return true;
+    const x = pointer.x;
+    const y = pointer.y;
+
+    if (y <= 48) return true;
+
+    if (y >= this.scale.height - 140) return true;
+
+    if (this.debugVisible && x >= this.scale.width - 390 && y >= 45 && y <= 340) {
+      return true;
     }
+
     return false;
   }
 
@@ -1530,6 +1734,8 @@ class GameScene extends Phaser.Scene {
   update(time, delta) {
     this.updateUnits(delta);
     this.updateResourceHud();
+    this.updateSelectedPanel();
+    this.updateCommandPanel();
 
     this.farmTickTimer += delta;
     if (this.farmTickTimer >= FARM_TICK_INTERVAL_MS) {
@@ -1569,7 +1775,7 @@ class GameScene extends Phaser.Scene {
       this.renderBuildingGhost();
     }
 
-    if (!this.debugVisible || !this.debugText) return;
+    if (!this.debugText) return;
 
     const cam = this.cameras.main;
     const zoom = cam.zoom.toFixed(1);
