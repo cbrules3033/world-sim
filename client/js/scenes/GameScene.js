@@ -168,108 +168,15 @@ class GameScene extends Phaser.Scene {
   }
 
   assignGatherTask(unit, entity) {
-    if (!entity || !entity.canBeGathered || entity.amount <= 0 || !entity.resourceType) {
-      return;
-    }
-
-    const rules = RESOURCE_GATHER_RULES[entity.resourceType];
-    if (!rules) {
-      console.warn('No gather rules for resource:', entity.resourceType);
-      return;
-    }
-
-    unit.gatherTargetId = entity.id;
-    unit.gatherResourceType = entity.resourceType;
-    unit.carryCapacity = rules.carryCapacity;
-    unit.workState = 'moving_to_resource';
-    unit.gatherTimer = 0;
-
-    const point = this.getGatherPointNearEntity(entity, unit);
-    this.commandMoveUnit(unit, point.x, point.y);
-
-    console.log(`${unit.id} assigned to ${rules.actionName} ${entity.resourceType} from ${entity.id}`);
-  }
-
-  getGatherPointNearEntity(entity, unit) {
-    const ex = entity.position.x * SCALE.TERRAIN_TILE_SIZE;
-    const ey = entity.position.y * SCALE.TERRAIN_TILE_SIZE;
-
-    const dx = unit.x - ex;
-    const dy = unit.y - ey;
-    const d = Math.sqrt(dx * dx + dy * dy) || 1;
-
-    const collisionRadius = entity.collisionRadiusPx || 8;
-    const standDistance = collisionRadius + SCALE.UNIT_RADIUS_PX + 4;
-
-    return {
-      x: ex + (dx / d) * standDistance,
-      y: ey + (dy / d) * standDistance,
-    };
+    this.resources.assignGatherTask(unit, entity);
   }
 
   getResourceEntityById(id) {
-    return this.resourceEntities.find(e => e.id === id);
+    return this.resources.getResourceEntityById(id);
   }
 
   getBuildingById(id) {
     return this.buildings.find(b => b.id === id);
-  }
-
-  getNearestDropoff(unit, resourceType) {
-    const rules = RESOURCE_GATHER_RULES[resourceType];
-
-    if (!rules) {
-      console.warn('No dropoff rules for resource:', resourceType);
-      return null;
-    }
-
-    let best = null;
-    let bestDist = Infinity;
-
-    for (const b of this.buildings) {
-      if (b.ownerId !== this.playerId) continue;
-      if (!b.constructed) continue;
-      if (!rules.validDropoffs.includes(b.type)) continue;
-
-      const bx = b.worldX + (b.footprintW * SCALE.BUILD_CELL_SIZE) / 2;
-      const by = b.worldY + (b.footprintH * SCALE.BUILD_CELL_SIZE) / 2;
-
-      const dx = bx - unit.x;
-      const dy = by - unit.y;
-      const d = Math.sqrt(dx * dx + dy * dy);
-
-      if (d < bestDist) {
-        best = b;
-        bestDist = d;
-      }
-    }
-
-    return best;
-  }
-
-  getDropoffPointNearBuilding(building, unit) {
-    const left = building.worldX;
-    const right = building.worldX + building.footprintW * SCALE.BUILD_CELL_SIZE;
-    const top = building.worldY;
-    const bottom = building.worldY + building.footprintH * SCALE.BUILD_CELL_SIZE;
-
-    const cx = (left + right) / 2;
-    const cy = (top + bottom) / 2;
-
-    const dx = unit.x - cx;
-    const dy = unit.y - cy;
-
-    if (Math.abs(dx) > Math.abs(dy)) {
-      return {
-        x: dx < 0 ? left - 10 : right + 10,
-        y: Phaser.Math.Clamp(unit.y, top, bottom),
-      };
-    }
-
-    return {
-      x: Phaser.Math.Clamp(unit.x, left, right),
-      y: dy < 0 ? top - 10 : bottom + 10,
-    };
   }
 
   clearUnitWork(unit) {
@@ -332,213 +239,15 @@ class GameScene extends Phaser.Scene {
   }
 
   sendUnitToDropoff(unit) {
-    if (!unit.carryResource || unit.carryAmount <= 0) {
-      unit.workState = 'idle';
-      return false;
-    }
-
-    const dropoff = this.getNearestDropoff(unit, unit.carryResource);
-
-    if (!dropoff) {
-      console.warn('No dropoff found for:', unit.carryResource);
-      unit.workState = 'idle';
-      return false;
-    }
-
-    unit.dropoffTargetId = dropoff.id;
-    unit.workState = 'moving_to_dropoff';
-
-    const point = this.getDropoffPointNearBuilding(dropoff, unit);
-    this.commandMoveUnit(unit, point.x, point.y);
-
-    return true;
-  }
-
-  getCarryColor(resourceType) {
-    switch (resourceType) {
-      case 'wood': return 0xc49a5a;
-      case 'stone': return 0xaaaaaa;
-      case 'copper': return 0xcd7f32;
-      case 'iron': return 0x555555;
-      default: return 0xffffcc;
-    }
-  }
-
-  findNearestResourceEntity(unit, resourceType, maxDistancePx = 500) {
-    let best = null;
-    let bestDist = Infinity;
-
-    for (const entity of this.resourceEntities) {
-      if (!entity.canBeGathered) continue;
-      if (entity.resourceType !== resourceType) continue;
-      if (entity.amount <= 0) continue;
-
-      const ex = entity.position.x * SCALE.TERRAIN_TILE_SIZE;
-      const ey = entity.position.y * SCALE.TERRAIN_TILE_SIZE;
-
-      const dx = ex - unit.x;
-      const dy = ey - unit.y;
-      const d = Math.sqrt(dx * dx + dy * dy);
-
-      if (d < bestDist && d <= maxDistancePx) {
-        best = entity;
-        bestDist = d;
-      }
-    }
-
-    return best;
-  }
-
-  continueGatheringSameResource(unit) {
-    const resourceType = unit.gatherResourceType || unit.carryResource;
-
-    if (!resourceType) {
-      unit.workState = 'idle';
-      unit.gatherTargetId = null;
-      return false;
-    }
-
-    const next = this.findNearestResourceEntity(unit, resourceType, 500);
-
-    if (next) {
-      this.assignGatherTask(unit, next);
-      return true;
-    }
-
-    unit.workState = 'idle';
-    unit.gatherTargetId = null;
-    unit.gatherResourceType = null;
-    return false;
-  }
-
-  updateVillagerWork(unit, delta) {
-    if (unit.type !== 'villager') return;
-
-    if (unit.workState === 'moving_to_resource' && unit.state === 'idle') {
-      unit.workState = 'gathering';
-      unit.gatherTimer = 0;
-    }
-
-    if (unit.workState === 'gathering') {
-      this.updateGathering(unit, delta);
-    }
-
-    if (unit.workState === 'moving_to_dropoff' && unit.state === 'idle') {
-      this.depositCarriedResources(unit);
-    }
-  }
-
-  updateGathering(unit, delta) {
-    const entity = this.getResourceEntityById(unit.gatherTargetId);
-
-    if (!entity || entity.amount <= 0) {
-      this.continueGatheringSameResource(unit);
-      return;
-    }
-
-    const resourceType = entity.resourceType;
-    const rules = RESOURCE_GATHER_RULES[resourceType];
-
-    if (!rules) {
-      console.warn('No gather rules for:', resourceType);
-      unit.workState = 'idle';
-      unit.gatherTargetId = null;
-      unit.gatherResourceType = null;
-      return;
-    }
-
-    unit.gatherTimer += delta;
-
-    if (unit.gatherTimer < rules.gatherIntervalMs) return;
-
-    unit.gatherTimer = 0;
-
-    const remainingCapacity = unit.carryCapacity - unit.carryAmount;
-
-    if (remainingCapacity <= 0) {
-      this.sendUnitToDropoff(unit);
-      return;
-    }
-
-    const amount = Math.min(rules.gatherAmount, entity.amount, remainingCapacity);
-
-    entity.amount -= amount;
-    unit.carryResource = resourceType;
-    unit.carryAmount += amount;
-
-    if (entity.amount <= 0) {
-      this.removeResourceEntity(entity.id);
-    }
-
-    if (unit.carryAmount >= unit.carryCapacity) {
-      this.sendUnitToDropoff(unit);
-    }
-  }
-
-  depositCarriedResources(unit) {
-    if (!unit.carryResource || unit.carryAmount <= 0) {
-      unit.workState = 'idle';
-      return;
-    }
-
-    const depositedResource = unit.carryResource;
-    const oldTargetId = unit.gatherTargetId;
-
-    this.playerResources[depositedResource] += unit.carryAmount;
-
-    unit.carryResource = null;
-    unit.carryAmount = 0;
-    unit.dropoffTargetId = null;
-
-    const oldTarget = this.getResourceEntityById(oldTargetId);
-
-    if (oldTarget && oldTarget.amount > 0) {
-      this.assignGatherTask(unit, oldTarget);
-      return;
-    }
-
-    unit.gatherResourceType = depositedResource;
-    this.continueGatheringSameResource(unit);
-  }
-
-  unblockBuildCellsForEntity(entityId) {
-    for (let y = 0; y < this.buildGridHeight; y++) {
-      for (let x = 0; x < this.buildGridWidth; x++) {
-        const cell = this.buildGrid[y][x];
-
-        if (cell.blockedBy === entityId) {
-          cell.blockedBy = null;
-
-          if (!cell.occupiedBy) {
-            cell.buildable = true;
-            cell.pathable = true;
-          }
-        }
-      }
-    }
+    return this.resources.sendUnitToDropoff(unit);
   }
 
   removeResourceEntity(id) {
-    const index = this.resourceEntities.findIndex(e => e.id === id);
-    if (index === -1) return;
+    this.resources.removeResourceEntity(id);
+  }
 
-    this.resourceEntities.splice(index, 1);
-
-    this.unblockBuildCellsForEntity(id);
-
-    this.renderEntities();
-
-    if (this.placementMode) {
-      this.ghostValid = this.isBuildable(
-        this.ghostBuildX,
-        this.ghostBuildY,
-        this.placementMode.w,
-        this.placementMode.h
-      );
-      this.renderBuildingGhost();
-    }
-
-    console.log(`Resource depleted and build cells freed: ${id}`);
+  updateVillagerWork(unit, delta) {
+    this.resources.updateVillagerWork(unit, delta);
   }
 
   create() {
@@ -577,6 +286,7 @@ class GameScene extends Phaser.Scene {
     this.selectedBuildingGraphics = this.add.graphics().setDepth(45);
 
     this.pathfinding = new PathfindingSystem(this);
+    this.resources = new ResourceSystem(this);
     this.ui = new UISystem(this);
 
     this.worldObjects = (this.worldObjects || []).concat([
