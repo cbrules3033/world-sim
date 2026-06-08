@@ -155,6 +155,11 @@ class UISystem {
       return 'Constructing';
     }
 
+    if (unit.workState === 'moving_to_crop_plot') return 'Going to farm';
+    if (unit.workState === 'planting') return 'Planting';
+    if (unit.workState === 'growing_crop') return 'Tending crops';
+    if (unit.workState === 'harvesting_crop') return 'Harvesting';
+
     return unit.workState;
   }
 
@@ -189,8 +194,24 @@ class UISystem {
       lines.push(`Train: ${scene.formatCost(VILLAGER_COST)}`);
     }
 
-    if (building.type === 'farm') {
-      lines.push(`Produces: +${FOOD_PER_FARM_TICK} food / ${FARM_TICK_INTERVAL_MS / 1000}s`);
+    if (building.type === 'farm' && building.constructed) {
+      const plots = scene.buildingSystem.getCropPlotsForFarm(building.id);
+      const worked = plots.filter(p => p.assignedWorkerId).length;
+
+      lines.push(`Plots: ${plots.length}`);
+      lines.push(`Worked: ${worked}/${plots.length}`);
+      lines.push('Assign: right-click hub');
+    }
+
+    if (building.type === 'crop_plot') {
+      lines.push(`State: ${building.cropState || 'empty'}`);
+      lines.push(`Worker: ${building.assignedWorkerId ? 'Yes' : 'No'}`);
+
+      if (building.farmHubId) {
+        lines.push('Connected: Yes');
+      } else {
+        lines.push('Connected: No');
+      }
     }
 
     return lines;
@@ -199,6 +220,16 @@ class UISystem {
   getPlacementStatusText() {
     const scene = this.scene;
     if (!scene.placementMode) return '';
+
+    if (scene.placementMode?.type === 'crop_plot') {
+      const connected = scene.buildingSystem.isValidCropPlotPlacement(
+        scene.ghostBuildX,
+        scene.ghostBuildY,
+        scene.placementMode.w,
+        scene.placementMode.h
+      );
+      if (!connected) return 'Must touch Farm/Plot';
+    }
 
     const landValid = scene.isBuildable(scene.ghostBuildX, scene.ghostBuildY, scene.placementMode.w, scene.placementMode.h);
     const canAfford = scene.canAffordCost(scene.placementMode.cost || {});

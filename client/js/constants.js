@@ -14,7 +14,8 @@ const BUILDING_DEFS = {
   lumber_camp: { label: 'Lumber Camp', shortLabel: 'Lumber', hotkey: 'L', w: 7, h: 7, color: 0x8b5a2b, hp: 500, cost: { wood: 50 }, buildTimeMs: 5000 },
   mining_camp: { label: 'Mining Camp', shortLabel: 'Mining', hotkey: 'M', w: 7, h: 7, color: 0x777777, hp: 500, cost: { wood: 50 }, buildTimeMs: 5000 },
   barracks: { label: 'Barracks', shortLabel: 'Barracks', hotkey: 'B', w: 12, h: 10, color: 0x9a6a3a, hp: 900, cost: { wood: 150 }, buildTimeMs: 10000 },
-  farm: { label: 'Farm', shortLabel: 'Farm', hotkey: 'G', w: 12, h: 12, color: 0xb5a642, hp: 200, cost: { wood: 60 }, buildTimeMs: 8000 },
+  farm: { label: 'Farm Hub', shortLabel: 'Farm', hotkey: 'G', w: 10, h: 10, color: 0x9b7a36, hp: 350, cost: { wood: 60 }, buildTimeMs: 8000 },
+  crop_plot: { label: 'Crop Plot', shortLabel: 'Plot', hotkey: 'P', w: 4, h: 4, color: 0x7a4f24, hp: 100, cost: { wood: 15 }, buildTimeMs: 2500, requiresFarmConnection: true },
 };
 
 const TERRAIN_COLORS = {
@@ -75,6 +76,14 @@ const POPULATION = {
 
 const VILLAGER_COST = {
   food: 50,
+};
+
+const CROP_PLOT = {
+  FOOD_PER_HARVEST: 12,
+  PLANT_TIME_MS: 1800,
+  GROW_TIME_MS: 5000,
+  HARVEST_TIME_MS: 1800,
+  WORK_RANGE_PX: 22,
 };
 
 const FOOD_PER_FARM_TICK = 2;

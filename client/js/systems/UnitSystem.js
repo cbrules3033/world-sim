@@ -13,6 +13,7 @@ class UnitSystem {
 
   clearUnitWork(unit) {
     this.removeBuilderFromBuildings(unit);
+    this.scene.buildingSystem?.removeFarmerFromPlot(unit);
     unit.workState = 'idle';
     unit.gatherTargetId = null;
     unit.gatherResourceType = null;
@@ -177,6 +178,27 @@ class UnitSystem {
           x: building.worldX + (building.footprintW * SCALE.BUILD_CELL_SIZE) / 2,
           y: building.worldY + (building.footprintH * SCALE.BUILD_CELL_SIZE) / 2,
           maxDistance: Math.max(building.footprintW, building.footprintH) * SCALE.BUILD_CELL_SIZE / 2 + 24,
+        };
+      }
+    }
+
+    if (
+      unit.cropPlotId &&
+      (
+        unit.workState === 'moving_to_crop_plot' ||
+        unit.workState === 'planting' ||
+        unit.workState === 'growing_crop' ||
+        unit.workState === 'harvesting_crop'
+      )
+    ) {
+      const plot = scene.getBuildingById(unit.cropPlotId);
+
+      if (plot) {
+        const center = scene.buildingSystem.getBuildingCenter(plot);
+        return {
+          x: center.x,
+          y: center.y,
+          maxDistance: 30,
         };
       }
     }
@@ -457,6 +479,7 @@ class UnitSystem {
     for (const u of scene.units) {
       scene.updateVillagerWork(u, delta);
       scene.buildingSystem?.updateBuilderWork(u, delta);
+      scene.buildingSystem?.updateFarmWork(u, delta);
     }
 
     const separated = this.applyUnitSeparation();

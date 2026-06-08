@@ -95,7 +95,7 @@ class BuildingSystem {
     this.scene.renderSelectedBuilding();
   }
 
-  isBuildable(buildX, buildY, fw, fh) {
+  isBuildable(buildX, buildY, fw, fh, type = null) {
     const grid = this.scene.buildGrid;
     for (let dx = 0; dx < fw; dx++) {
       for (let dy = 0; dy < fh; dy++) {
@@ -107,12 +107,26 @@ class BuildingSystem {
         if (cell.occupiedBy) return false;
       }
     }
+    if (type === 'crop_plot') {
+      return this.isValidCropPlotPlacement(buildX, buildY, fw, fh);
+    }
     return true;
   }
 
   getPlacementStatusText() {
     if (!this.scene.placementMode) return '';
-    const landValid = this.isBuildable(this.scene.ghostBuildX, this.scene.ghostBuildY, this.scene.placementMode.w, this.scene.placementMode.h);
+
+    if (this.scene.placementMode?.type === 'crop_plot') {
+      const connected = this.isValidCropPlotPlacement(
+        this.scene.ghostBuildX,
+        this.scene.ghostBuildY,
+        this.scene.placementMode.w,
+        this.scene.placementMode.h
+      );
+      if (!connected) return 'Must touch Farm/Plot';
+    }
+
+    const landValid = this.isBuildable(this.scene.ghostBuildX, this.scene.ghostBuildY, this.scene.placementMode.w, this.scene.placementMode.h, this.scene.placementMode.type);
     const canAfford = this.canAffordCost(this.scene.placementMode.cost || {});
     if (!landValid) return 'Blocked';
     if (!canAfford) return `Need ${this.formatCost(this.scene.placementMode.cost || {})}`;
@@ -137,7 +151,7 @@ class BuildingSystem {
     scene.placementGraphics.clear();
     if (!scene.placementMode) return;
 
-    const landValid = this.isBuildable(scene.ghostBuildX, scene.ghostBuildY, scene.placementMode.w, scene.placementMode.h);
+    const landValid = this.isBuildable(scene.ghostBuildX, scene.ghostBuildY, scene.placementMode.w, scene.placementMode.h, scene.placementMode.type);
     const canAfford = this.canAffordCost(scene.placementMode.cost || {});
 
     let color = 0x00ff00;
@@ -188,6 +202,13 @@ class BuildingSystem {
           cell.occupiedBy = building.id;
         }
       }
+    }
+
+    if (type === 'crop_plot') {
+      building.farmHubId = this.findConnectedFarmHubIdForPlot(buildX, buildY, def.w, def.h);
+      building.cropState = 'empty';
+      building.cropTimerMs = 0;
+      building.assignedWorkerId = null;
     }
 
     scene.buildings.push(building);
@@ -484,6 +505,282 @@ class BuildingSystem {
     return best || fallback;
   }
 
+  // --- crop plot / farm helpers ---
+
+  isCropPlotType(type) {
+    return type === 'crop_plot';
+  }
+
+  isFarmHub(building) {
+    return building && building.type === 'farm' && building.constructed;
+  }
+
+  isCropPlot(building) {
+    return building && building.type === 'crop_plot';
+  }
+
+  getBuildingsAdjacentToFootprint(buildX, buildY, fw, fh) {
+    const scene = this.scene;
+    const adjacentIds = new Set();
+
+    const minX = buildX;
+    const minY = buildY;
+    const maxX = buildX + fw - 1;
+    const maxY = buildY + fh - 1;
+
+    const cells = [];
+
+    for (let x = minX; x <= maxX; x++) {
+      cells.push({ x, y: minY - 1 });
+      cells.push({ x, y: maxY + 1 });
+    }
+
+    for (let y = minY; y <= maxY; y++) {
+      cells.push({ x: minX - 1, y });
+      cells.push({ x: maxX + 1, y });
+    }
+
+    for (const c of cells) {
+      if (c.x < 0 || c.x >= scene.buildGridWidth || c.y < 0 || c.y >= scene.buildGridHeight) continue;
+
+      const cell = scene.buildGrid[c.y][c.x];
+
+      if (cell?.occupiedBy) {
+        adjacentIds.add(cell.occupiedBy);
+      }
+    }
+
+    return Array.from(adjacentIds)
+      .map(id => scene.getBuildingById(id))
+      .filter(Boolean);
+  }
+
+  findConnectedFarmHubIdForPlot(buildX, buildY, fw, fh) {
+    const adjacent = this.getBuildingsAdjacentToFootprint(buildX, buildY, fw, fh);
+
+    for (const building of adjacent) {
+      if (this.isFarmHub(building)) {
+        return building.id;
+      }
+
+      if (this.isCropPlot(building) && building.farmHubId) {
+        return building.farmHubId;
+      }
+    }
+
+    return null;
+  }
+
+  isValidCropPlotPlacement(buildX, buildY, fw, fh) {
+    return !!this.findConnectedFarmHubIdForPlot(buildX, buildY, fw, fh);
+  }
+
+  getCropPlotsForFarm(farmHubId) {
+    return this.scene.buildings.filter(b =>
+      b.type === 'crop_plot' &&
+      b.farmHubId === farmHubId &&
+      b.constructed
+    );
+  }
+
+  getAvailableCropPlotsForFarm(farmHubId) {
+    return this.getCropPlotsForFarm(farmHubId).filter(plot =>
+      !plot.assignedWorkerId
+    );
+  }
+
+  getCropPlotByWorkerId(unitId) {
+    return this.scene.buildings.find(b =>
+      b.type === 'crop_plot' &&
+      b.assignedWorkerId === unitId
+    );
+  }
+
+  getCropPlotWorkPoint(plot, unit = null) {
+    return this.getBuildingCenter(plot);
+  }
+
+  removeFarmerFromPlot(unit) {
+    const plot = this.getCropPlotByWorkerId(unit.id);
+
+    if (plot) {
+      plot.assignedWorkerId = null;
+      if (plot.cropState !== 'growing') {
+        plot.cropState = 'empty';
+        plot.cropTimerMs = 0;
+      }
+    }
+
+    unit.farmHubId = null;
+    unit.cropPlotId = null;
+    unit.cropTimerMs = 0;
+    unit.cropTargetX = null;
+    unit.cropTargetY = null;
+  }
+
+  findNearestAvailableCropPlot(unit, plots) {
+    let best = null;
+    let bestDist = Infinity;
+
+    for (const plot of plots) {
+      const center = this.getBuildingCenter(plot);
+      const dx = center.x - unit.x;
+      const dy = center.y - unit.y;
+      const d = dx * dx + dy * dy;
+
+      if (d < bestDist) {
+        bestDist = d;
+        best = plot;
+      }
+    }
+
+    return best;
+  }
+
+  assignVillagerToFarm(unit, farmHub) {
+    const scene = this.scene;
+
+    if (!unit || unit.type !== 'villager') return false;
+    if (!farmHub || farmHub.type !== 'farm' || !farmHub.constructed) return false;
+
+    const available = this.getAvailableCropPlotsForFarm(farmHub.id);
+
+    if (available.length === 0) {
+      return false;
+    }
+
+    const plot = this.findNearestAvailableCropPlot(unit, available);
+
+    if (!plot) return false;
+
+    scene.clearUnitWork(unit);
+
+    plot.assignedWorkerId = unit.id;
+
+    unit.workState = 'moving_to_crop_plot';
+    unit.farmHubId = farmHub.id;
+    unit.cropPlotId = plot.id;
+    unit.cropTimerMs = 0;
+    unit.jobRetryTimer = 0;
+
+    const workPoint = this.getCropPlotWorkPoint(plot, unit);
+
+    unit.cropTargetX = workPoint.x;
+    unit.cropTargetY = workPoint.y;
+
+    scene.commandMoveUnit(unit, workPoint.x, workPoint.y, { stopOnFail: false });
+
+    return true;
+  }
+
+  updateFarmWork(unit, delta) {
+    const scene = this.scene;
+
+    if (
+      unit.workState !== 'moving_to_crop_plot' &&
+      unit.workState !== 'planting' &&
+      unit.workState !== 'growing_crop' &&
+      unit.workState !== 'harvesting_crop'
+    ) {
+      return;
+    }
+
+    const plot = scene.getBuildingById(unit.cropPlotId);
+    const farmHub = scene.getBuildingById(unit.farmHubId);
+
+    if (!plot || !plot.constructed || !farmHub || !farmHub.constructed) {
+      this.removeFarmerFromPlot(unit);
+      unit.workState = 'idle';
+      unit.state = 'idle';
+      unit.path = [];
+      unit.pathIndex = 0;
+      return;
+    }
+
+    if (plot.assignedWorkerId !== unit.id) {
+      plot.assignedWorkerId = unit.id;
+    }
+
+    const workPoint = this.getCropPlotWorkPoint(plot, unit);
+    const dx = unit.x - workPoint.x;
+    const dy = unit.y - workPoint.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+
+    if (unit.workState === 'moving_to_crop_plot') {
+      if (dist <= CROP_PLOT.WORK_RANGE_PX) {
+        unit.state = 'idle';
+        unit.path = [];
+        unit.pathIndex = 0;
+        unit.workState = 'planting';
+        unit.cropTimerMs = 0;
+        plot.cropState = 'planting';
+        plot.cropTimerMs = 0;
+        unit.jobRetryTimer = 0;
+        return;
+      }
+
+      if (unit.state === 'idle') {
+        unit.jobRetryTimer = (unit.jobRetryTimer || 0) + delta;
+
+        if (unit.jobRetryTimer > 800) {
+          unit.jobRetryTimer = 0;
+          scene.commandMoveUnit(unit, workPoint.x, workPoint.y, { stopOnFail: false });
+        }
+      }
+
+      return;
+    }
+
+    if (unit.workState === 'planting') {
+      unit.cropTimerMs += delta;
+      plot.cropState = 'planting';
+      plot.cropTimerMs = unit.cropTimerMs;
+
+      if (unit.cropTimerMs >= CROP_PLOT.PLANT_TIME_MS) {
+        unit.workState = 'growing_crop';
+        unit.cropTimerMs = 0;
+        plot.cropState = 'growing';
+        plot.cropTimerMs = 0;
+      }
+
+      return;
+    }
+
+    if (unit.workState === 'growing_crop') {
+      unit.cropTimerMs += delta;
+      plot.cropState = 'growing';
+      plot.cropTimerMs = unit.cropTimerMs;
+
+      if (unit.cropTimerMs >= CROP_PLOT.GROW_TIME_MS) {
+        unit.workState = 'harvesting_crop';
+        unit.cropTimerMs = 0;
+        plot.cropState = 'harvesting';
+        plot.cropTimerMs = 0;
+      }
+
+      return;
+    }
+
+    if (unit.workState === 'harvesting_crop') {
+      unit.cropTimerMs += delta;
+      plot.cropState = 'harvesting';
+      plot.cropTimerMs = unit.cropTimerMs;
+
+      if (unit.cropTimerMs >= CROP_PLOT.HARVEST_TIME_MS) {
+        scene.playerResources.food += CROP_PLOT.FOOD_PER_HARVEST;
+        scene.updateResourceHud();
+
+        scene.addGameMessage(`+${CROP_PLOT.FOOD_PER_HARVEST} food`, UI_STYLE.textGood);
+
+        unit.workState = 'planting';
+        unit.cropTimerMs = 0;
+
+        plot.cropState = 'planting';
+        plot.cropTimerMs = 0;
+      }
+    }
+  }
+
   assignBuilderToBuilding(unit, building) {
     const scene = this.scene;
 
@@ -739,30 +1036,10 @@ class BuildingSystem {
   update(delta) {
     const scene = this.scene;
 
-    scene.farmTickTimer += delta;
-    if (scene.farmTickTimer >= FARM_TICK_INTERVAL_MS) {
-      scene.farmTickTimer -= FARM_TICK_INTERVAL_MS;
-      let producedFood = 0;
-      for (const b of scene.buildings) {
-        if (b.constructed && b.type === 'farm' && b.ownerId === scene.playerId) {
-          producedFood += FOOD_PER_FARM_TICK;
-        }
-      }
-      if (producedFood > 0) {
-        scene.playerResources.food += producedFood;
-        scene.updateResourceHud();
-        if (scene.uiSystem) scene.uiSystem.lastActionPanelKey = null;
-        scene.uiSystem?.updateActionPanel();
-        scene.uiSystem?.updateCommandPanel();
-        scene.showFloatingMessage(`+${producedFood} food`, scene.scale.width / 2, 92, UI_STYLE.textGood);
-        scene.addGameMessage(`+${producedFood} food from farms`, UI_STYLE.textGood);
-      }
-    }
-
     this.updateConstruction(delta);
 
     if (scene.placementMode) {
-      const landValid = this.isBuildable(scene.ghostBuildX, scene.ghostBuildY, scene.placementMode.w, scene.placementMode.h);
+      const landValid = this.isBuildable(scene.ghostBuildX, scene.ghostBuildY, scene.placementMode.w, scene.placementMode.h, scene.placementMode.type);
       const canAfford = this.canAffordCost(scene.placementMode.cost || {});
       scene.ghostValid = landValid && canAfford;
       this.renderBuildingGhost();

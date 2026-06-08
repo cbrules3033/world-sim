@@ -464,7 +464,14 @@ class GameScene extends Phaser.Scene {
       const pw = b.footprintW * SCALE.BUILD_CELL_SIZE;
       const ph = b.footprintH * SCALE.BUILD_CELL_SIZE;
       const pad = SCALE.BUILD_CELL_SIZE;
-      const color = BUILDING_DEFS[b.type]?.color || 0xb08a55;
+      let color = BUILDING_DEFS[b.type]?.color || 0xb08a55;
+
+      if (b.type === 'crop_plot' && b.constructed) {
+        if (b.cropState === 'empty') color = 0x7a4f24;
+        if (b.cropState === 'planting') color = 0x5c3b1c;
+        if (b.cropState === 'growing') color = 0x3f8f2f;
+        if (b.cropState === 'harvesting') color = 0xd6b34a;
+      }
 
       if (!b.constructed) {
         const progress = b.constructionRequiredMs > 0
@@ -496,6 +503,21 @@ class GameScene extends Phaser.Scene {
 
       this.buildingGraphics.lineStyle(1, 0x222222, 0.8);
       this.buildingGraphics.strokeRect(px, py, pw, ph);
+
+      if (b.type === 'crop_plot' && b.assignedWorkerId) {
+        let required = 1;
+
+        if (b.cropState === 'planting') required = CROP_PLOT.PLANT_TIME_MS;
+        if (b.cropState === 'growing') required = CROP_PLOT.GROW_TIME_MS;
+        if (b.cropState === 'harvesting') required = CROP_PLOT.HARVEST_TIME_MS;
+
+        const progress = Phaser.Math.Clamp((b.cropTimerMs || 0) / required, 0, 1);
+
+        this.buildingGraphics.fillStyle(0x000000, 0.5);
+        this.buildingGraphics.fillRect(px, py + ph - 3, pw, 3);
+        this.buildingGraphics.fillStyle(0x80ff9f, 0.9);
+        this.buildingGraphics.fillRect(px, py + ph - 3, pw * progress, 3);
+      }
     }
   }
 
@@ -602,6 +624,10 @@ class GameScene extends Phaser.Scene {
 
   assignBuilderToBuilding(unit, building) {
     return this.buildingSystem.assignBuilderToBuilding(unit, building);
+  }
+
+  assignVillagerToFarm(unit, farmHub) {
+    return this.buildingSystem.assignVillagerToFarm(unit, farmHub);
   }
 
   getEntityAtPointer(pointer = this.input.activePointer) {
@@ -767,6 +793,33 @@ class GameScene extends Phaser.Scene {
       }
 
       const clickedBuilding = this.getBuildingAtPointer(pointer);
+
+      if (
+        this.selectedUnits.length > 0 &&
+        clickedBuilding &&
+        clickedBuilding.type === 'farm' &&
+        clickedBuilding.constructed
+      ) {
+        let assigned = 0;
+
+        for (const unit of this.selectedUnits) {
+          if (unit.type === 'villager') {
+            if (this.assignVillagerToFarm(unit, clickedBuilding)) {
+              assigned++;
+            }
+          }
+        }
+
+        if (assigned > 0) {
+          this.addGameMessage(`${assigned} farmer${assigned === 1 ? '' : 's'} assigned`, UI_STYLE.textGood);
+        } else {
+          this.addGameMessage('No open crop plots', UI_STYLE.textWarn);
+        }
+
+        this.renderUnits();
+        this.renderPaths();
+        return;
+      }
 
       if (
         this.selectedUnits.length > 0 &&
@@ -982,8 +1035,8 @@ class GameScene extends Phaser.Scene {
     console.log('Jumped to resource entity:', entity);
   }
 
-  isBuildable(buildX, buildY, fw, fh) {
-    return this.buildingSystem.isBuildable(buildX, buildY, fw, fh);
+  isBuildable(buildX, buildY, fw, fh, type = null) {
+    return this.buildingSystem.isBuildable(buildX, buildY, fw, fh, type);
   }
 
   getPlacementStatusText() {
