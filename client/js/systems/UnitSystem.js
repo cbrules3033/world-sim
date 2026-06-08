@@ -476,10 +476,16 @@ class UnitSystem {
       anyMoved = true;
     }
 
+    let anyFarmVisualChanged = false;
+
     for (const u of scene.units) {
       scene.updateVillagerWork(u, delta);
       scene.buildingSystem?.updateBuilderWork(u, delta);
-      scene.buildingSystem?.updateFarmWork(u, delta);
+
+      const farmVisualChanged = scene.buildingSystem?.updateFarmWork(u, delta);
+      if (farmVisualChanged) {
+        anyFarmVisualChanged = true;
+      }
     }
 
     const separated = this.applyUnitSeparation();
@@ -487,6 +493,10 @@ class UnitSystem {
     if (anyMoved || separated) {
       this.renderUnits();
       scene.renderPaths();
+    }
+
+    if (anyFarmVisualChanged) {
+      scene.renderBuildings();
     }
   }
 }

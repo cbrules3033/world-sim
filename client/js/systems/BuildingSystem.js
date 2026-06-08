@@ -611,6 +611,8 @@ class BuildingSystem {
       }
     }
 
+    this.scene.renderBuildings();
+
     unit.farmHubId = null;
     unit.cropPlotId = null;
     unit.cropTimerMs = 0;
@@ -656,6 +658,7 @@ class BuildingSystem {
     scene.clearUnitWork(unit);
 
     plot.assignedWorkerId = unit.id;
+    scene.renderBuildings();
 
     unit.workState = 'moving_to_crop_plot';
     unit.farmHubId = farmHub.id;
@@ -682,8 +685,10 @@ class BuildingSystem {
       unit.workState !== 'growing_crop' &&
       unit.workState !== 'harvesting_crop'
     ) {
-      return;
+      return false;
     }
+
+    let visualChanged = false;
 
     const plot = scene.getBuildingById(unit.cropPlotId);
     const farmHub = scene.getBuildingById(unit.farmHubId);
@@ -694,11 +699,12 @@ class BuildingSystem {
       unit.state = 'idle';
       unit.path = [];
       unit.pathIndex = 0;
-      return;
+      return true;
     }
 
     if (plot.assignedWorkerId !== unit.id) {
       plot.assignedWorkerId = unit.id;
+      visualChanged = true;
     }
 
     const workPoint = this.getCropPlotWorkPoint(plot, unit);
@@ -716,7 +722,8 @@ class BuildingSystem {
         plot.cropState = 'planting';
         plot.cropTimerMs = 0;
         unit.jobRetryTimer = 0;
-        return;
+        visualChanged = true;
+        return visualChanged;
       }
 
       if (unit.state === 'idle') {
@@ -728,43 +735,48 @@ class BuildingSystem {
         }
       }
 
-      return;
+      return visualChanged;
     }
 
     if (unit.workState === 'planting') {
       unit.cropTimerMs += delta;
       plot.cropState = 'planting';
       plot.cropTimerMs = unit.cropTimerMs;
+      visualChanged = true;
 
       if (unit.cropTimerMs >= CROP_PLOT.PLANT_TIME_MS) {
         unit.workState = 'growing_crop';
         unit.cropTimerMs = 0;
         plot.cropState = 'growing';
         plot.cropTimerMs = 0;
+        visualChanged = true;
       }
 
-      return;
+      return visualChanged;
     }
 
     if (unit.workState === 'growing_crop') {
       unit.cropTimerMs += delta;
       plot.cropState = 'growing';
       plot.cropTimerMs = unit.cropTimerMs;
+      visualChanged = true;
 
       if (unit.cropTimerMs >= CROP_PLOT.GROW_TIME_MS) {
         unit.workState = 'harvesting_crop';
         unit.cropTimerMs = 0;
         plot.cropState = 'harvesting';
         plot.cropTimerMs = 0;
+        visualChanged = true;
       }
 
-      return;
+      return visualChanged;
     }
 
     if (unit.workState === 'harvesting_crop') {
       unit.cropTimerMs += delta;
       plot.cropState = 'harvesting';
       plot.cropTimerMs = unit.cropTimerMs;
+      visualChanged = true;
 
       if (unit.cropTimerMs >= CROP_PLOT.HARVEST_TIME_MS) {
         scene.playerResources.food += CROP_PLOT.FOOD_PER_HARVEST;
@@ -777,8 +789,13 @@ class BuildingSystem {
 
         plot.cropState = 'planting';
         plot.cropTimerMs = 0;
+        visualChanged = true;
       }
+
+      return visualChanged;
     }
+
+    return visualChanged;
   }
 
   assignBuilderToBuilding(unit, building) {
